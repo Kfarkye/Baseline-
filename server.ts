@@ -1,12 +1,3 @@
-/**
- * ARCHITECTURAL PRINCIPLES
- * 
- * - The web is the database. Gemini reads the web. We don't duplicate.
- * - credentialdb stores ONLY user-specific data (accounts, auth, bet history, preferences, personal analytics).
- * - credentialdb NEVER stores cached public sports data, ingested odds/scores, ESPN normalized schemas, or public web data.
- * - Features combining both ground public data at request time and join with user data.
- */
-
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -16,373 +7,1228 @@ import Stripe from "stripe";
 import axios from "axios";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { cert, getApps, initializeApp, type ServiceAccount } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
+import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
+import {
+  buildAuditEvent,
+  buildFailureState,
+  buildSourceEvidence,
+  detectScreenshotOnlyInput,
+  isAllowedPassOutput,
+  isGameLevelSportsRequest,
+  isPublicNonInternalUrl,
+  isSourceStale,
+  MarketDataStatus,
+  ODDS_UNAVAILABLE_PARTIAL,
+  PayloadContractSchema,
+  PayloadContract,
+  SportsAnswerStateSchema,
+  SourceEvidence,
+  isSourceFresh,
+  validateNoSyntheticOdds,
+  validateRequiredEspnGroundingFields,
+  type EspnGameGrounding,
+  type FailureState,
+} from "./src/lib/governance.ts";
+import {
+  isGroundingFresh,
+  normalizeEspnScoreboardEvent,
+  type NormalizedEspnScoreboardEvent,
+  validateEspnGrounding,
+} from "./src/lib/espnGrounding.ts";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+
+const FREE_DAILY_CHAT_LIMIT = 5;
+const MAX_PAYMENT_AMOUNT_USD = 5000;
+const MIN_PAYMENT_AMOUNT_USD = 1;
+const CHAT_RATE_WINDOW_MS = 60_000;
+const CHAT_RATE_WINDOW_MAX = 12;
+const USER_PLAN_CACHE_TTL_MS = 60_000;
+const MAX_CHAT_MESSAGE_CHARS = 8000;
+const MAX_CHAT_HISTORY_ITEMS = 40;
+const MAX_CHAT_HISTORY_ITEM_CHARS = 12_000;
+const CHAT_MODEL_TIMEOUT_MS = 25_000;
+
+const DEFAULT_CHAT_MODEL = "gemini-3.1-pro-preview";
+const CHAT_MODEL_FALLBACKS = [
+  "gemini-3.1-pro-preview",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-1.5-pro",
+];
+
+const ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard";
+const ESPN_SCOREBOARD_HOME = "https://www.espn.com/mlb/scoreboard";
+
+interface VerifiedFirebaseUser {
+  uid: string;
+  email?: string;
+}
+
+type PlanTier = "free" | "pro" | "sharp";
+
+interface BoardEvent extends NormalizedEspnScoreboardEvent {
+  sport_key: string;
+  sport_title: string;
+  commence_time: string;
+  source_evidence: SourceEvidence[];
+  market_data_status: MarketDataStatus;
+}
+
+let adminInitialized = false;
+const dailyChatUsage = new Map<string, { date: string; count: number }>();
+const userPlanCache = new Map<string, { planTier: PlanTier; expiresAt: number }>();
+const chatRateWindow = new Map<string, number[]>();
+
+function getBearerToken(authHeader: string | undefined): string | null {
+  if (!authHeader) return null;
+  const [scheme, token] = authHeader.split(" ");
+  if (scheme !== "Bearer" || !token) return null;
+  return token;
+}
+
+function getCurrentUtcDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function extractUpstreamStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const direct = (error as { status?: unknown }).status;
+  if (typeof direct === "number") return direct;
+  const nested = (error as { cause?: unknown }).cause;
+  if (typeof nested === "object" && nested !== null && typeof (nested as { status?: unknown }).status === "number") {
+    return (nested as { status?: number }).status;
+  }
+  return undefined;
+}
+
+function extractUpstreamErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const direct = (error as { code?: unknown }).code;
+  if (typeof direct === "string") return direct;
+  if (typeof direct === "number") return String(direct);
+  const message = (error as { message?: unknown }).message;
+  if (typeof message === "string") {
+    const lowered = message.toLowerCase();
+    if (lowered.includes("permission_denied") || lowered.includes("permission denied")) return "PERMISSION_DENIED";
+    if (lowered.includes("not found")) return "NOT_FOUND";
+  }
+  return undefined;
+}
+
+function isModelNotFoundError(error: unknown): boolean {
+  const status = extractUpstreamStatus(error);
+  if (status === 404) return true;
+  const code = extractUpstreamErrorCode(error);
+  if (code === "404" || code === "NOT_FOUND") return true;
+  if (typeof error === "object" && error !== null) {
+    const message = String((error as { message?: unknown }).message ?? "").toLowerCase();
+    return message.includes("not found") && message.includes("model");
+  }
+  return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseServiceAccountFromEnv(): ServiceAccount | null {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) return null;
+
+  const candidates = [raw];
+  try {
+    candidates.push(Buffer.from(raw, "base64").toString("utf8"));
+  } catch {
+    // no-op
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (!isRecord(parsed)) continue;
+      if (typeof parsed.client_email !== "string" || typeof parsed.private_key !== "string") continue;
+      return {
+        projectId: typeof parsed.project_id === "string" ? parsed.project_id : undefined,
+        clientEmail: parsed.client_email,
+        privateKey: String(parsed.private_key).replace(/\\n/g, "\n"),
+      };
+    } catch {
+      // no-op
+    }
+  }
+
+  return null;
+}
+
+function ensureFirebaseAdminInitialized(projectId: string): void {
+  if (adminInitialized) return;
+  if (getApps().length === 0) {
+    const serviceAccount = parseServiceAccountFromEnv();
+    if (serviceAccount) {
+      initializeApp({
+        credential: cert(serviceAccount),
+        projectId: serviceAccount.projectId || projectId,
+      });
+    } else {
+      initializeApp({ projectId });
+    }
+  }
+  adminInitialized = true;
+}
+
+function isPaidPlan(planTier: PlanTier): boolean {
+  return planTier === "pro" || planTier === "sharp";
+}
+
+async function getTrustedUserPlanTier(uid: string): Promise<PlanTier> {
+  const cached = userPlanCache.get(uid);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) return cached.planTier;
+
+  try {
+    const db = getFirestore();
+    const userSnap = await db.collection("users").doc(uid).get();
+    const tier = userSnap.exists ? userSnap.data()?.planTier : "free";
+    const planTier: PlanTier = tier === "pro" || tier === "sharp" ? tier : "free";
+    userPlanCache.set(uid, {
+      planTier,
+      expiresAt: now + USER_PLAN_CACHE_TTL_MS,
+    });
+    return planTier;
+  } catch {
+    return "free";
+  }
+}
+
+async function getAndIncrementDailyChatUsage(uid: string): Promise<number> {
+  const today = getCurrentUtcDate();
+  const current = dailyChatUsage.get(uid);
+  if (!current || current.date !== today) {
+    const next = { date: today, count: 1 };
+    dailyChatUsage.set(uid, next);
+    return next.count;
+  }
+
+  current.count += 1;
+  dailyChatUsage.set(uid, current);
+  return current.count;
+}
+
+function isWithinBurstLimit(uid: string): boolean {
+  const now = Date.now();
+  const startsAt = now - CHAT_RATE_WINDOW_MS;
+  const current = chatRateWindow.get(uid) || [];
+  const active = current.filter((entry) => entry >= startsAt);
+  active.push(now);
+  chatRateWindow.set(uid, active);
+  return active.length <= CHAT_RATE_WINDOW_MAX;
+}
+
+function getChatModelCandidates(requestedModel: string): string[] {
+  const requested = requestedModel.trim() || DEFAULT_CHAT_MODEL;
+  const normalized = requested.toLowerCase();
+
+  const dedupe = new Set<string>();
+  const ordered = [];
+
+  if (CHAT_MODEL_FALLBACKS.some((model) => model.toLowerCase() === normalized)) {
+    ordered.push(requested);
+    for (const candidate of CHAT_MODEL_FALLBACKS) {
+      if (candidate.toLowerCase() !== normalized) {
+        ordered.push(candidate);
+      }
+    }
+  } else {
+    ordered.push(...CHAT_MODEL_FALLBACKS);
+  }
+
+  for (const model of ordered) {
+    dedupe.add(model);
+  }
+  dedupe.add("gemini-2.5-pro");
+  return [...dedupe];
+}
+
+async function verifyFirebaseIdToken(idToken: string): Promise<VerifiedFirebaseUser | null> {
+  try {
+    const decoded = await getAuth().verifyIdToken(idToken);
+    return { uid: decoded.uid, email: decoded.email };
+  } catch {
+    return null;
+  }
+}
+
+async function requireAuthenticatedUser(req: express.Request): Promise<VerifiedFirebaseUser | null> {
+  const token = getBearerToken(req.header("authorization"));
+  if (!token) return null;
+  return verifyFirebaseIdToken(token);
+}
+
+function stripInternalModelTerms(text: string): string {
+  const blocked = [
+    /confidence\s*score/gi,
+    /edge\s*score/gi,
+    /raw\s*rpc/gi,
+    /payload\s*contract/gi,
+    /sportsanswerstate/gi,
+    /failurestate/gi,
+    /auditevent/gi,
+    /stack\s*trace/gi,
+    /synthetic\s*odds/gi,
+    /governance/gi,
+    /grounding/gi,
+    /internal\s*terms?/gi,
+  ];
+  let sanitized = text;
+  for (const pattern of blocked) {
+    sanitized = sanitized.replace(pattern, "");
+  }
+  return sanitized.trim() || "No publishable answer is available right now.";
+}
+
+function hasBannedMarketPhrases(text: string): boolean {
+  const lower = text.toLowerCase();
+  const banned = [
+    /\bmoneyline\b/,
+    /\bspread\b/,
+    /\btotal\b/,
+    /\bodds?\b/,
+    /\bover\s*\/\s*under\b/,
+  ];
+  return banned.some((pattern) => pattern.test(lower));
+}
+
+function isScoreOnlyOutputContext(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    /score|inning|pace|state/.test(normalized) &&
+    !/\bmoneyline\b|\bspread\b|\btotal\b|\bodds?\b/.test(normalized)
+  );
+}
+
+function sanitizeScoreOnlyOutput(text: string): string {
+  if (!hasBannedMarketPhrases(text)) return text;
+  let sanitized = text;
+  const banned = [/\bmoneyline\b/gi, /\bspread\b/gi, /\b(over|under)\b/gi, /\btotal\b/gi, /\bodds?\b/gi];
+  for (const pattern of banned) {
+    sanitized = sanitized.replace(pattern, "");
+  }
+  sanitized = sanitized.replace(/\s{2,}/g, " ").trim();
+  if (!isScoreOnlyOutputContext(sanitized)) {
+    sanitized = `Allowed output: score/state/simple pace only. ${sanitized}`;
+  }
+  return stripInternalModelTerms(sanitized);
+}
+
+function sanitizeAllowedOutput(text: string, allowPartial: boolean): string {
+  if (!text) return "";
+  const sanitized = stripInternalModelTerms(text);
+  if (!allowPartial) return sanitized;
+  return sanitizeScoreOnlyOutput(sanitized);
+}
+
+function buildScoreStateEvidenceMessage(board: BoardEvent[]): string {
+  const fresh = board.find((entry) => isSourceFresh(entry.source_evidence[0]));
+  if (!fresh) return "";
+  const source = fresh.source_evidence[0];
+  return `ESPN checked • ${source.source_url} • ${new Date(source.fetched_at).toLocaleString()}`;
+}
+
+function isScreenshotOnlyInputLike(message: string, hasGroundingContext: boolean): boolean {
+  const hasScreenshotSignals = detectScreenshotOnlyInput(message, hasGroundingContext);
+  if (hasScreenshotSignals) return true;
+  const lower = message.toLowerCase();
+  return /\bscreenshot\b|\bimage\b|\bphoto\b/.test(lower) && !hasGroundingContext;
+}
+
+function mapToken(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((part) => part.length > 2 && !["the", "at", "vs", "v", "in", "of", "and", "for"].includes(part))
+    .join(" ");
+}
+
+type MatchedSelection = { game: BoardEvent; isSpecific: boolean };
+
+function normalizeGameText(message: string): string {
+  return message.toLowerCase().replace(/[^a-z0-9\s@]/g, " ");
+}
+
+function isGeneralSlateQuery(message: string): boolean {
+  return /\b(slate|board|today|tomorrow|yesterday|games?\s+today|all games|who.?s on|schedule)\b/i.test(message);
+}
+
+function selectEspnGameForMessage(message: string, board: BoardEvent[]): MatchedSelection | null {
+  const normalizedMessage = normalizeGameText(message);
+  const hasGeneralSlateSignal = isGeneralSlateQuery(message);
+
+  const explicitId = normalizedMessage.match(/\b(?:id|game[_\s-]*id)?\s*[:#]?\s*(\d{4,12})\b/);
+  if (explicitId) {
+    const expected = explicitId[1];
+    const exact = board.find((game) => String(game.event_id) === expected || String(game.id) === expected);
+    if (exact) return { game: exact, isSpecific: true };
+  }
+
+  let best: { game: BoardEvent; score: number; hasBoth: boolean } | null = null;
+
+  for (const game of board) {
+    const homeTokens = mapToken(game.home_team || "");
+    const awayTokens = mapToken(game.away_team || "");
+    const homeScore = homeTokens
+      .split(" ")
+      .filter((token) => token && normalizedMessage.includes(token)).length;
+    const awayScore = awayTokens
+      .split(" ")
+      .filter((token) => token && normalizedMessage.includes(token)).length;
+    const hasBoth = homeScore > 0 && awayScore > 0;
+
+    const score = homeScore + awayScore +
+      (/\b(vs|versus|@|read\s+on|matchup|game)\b/.test(normalizedMessage) ? 2 : 0) +
+      (/event|game|vs|read on|matchup/.test(normalizedMessage) ? 1 : 0);
+
+    if (!best || score > best.score) {
+      best = { game, score, hasBoth };
+    }
+  }
+
+  if (!best || best.score === 0) return null;
+  if (hasGeneralSlateSignal) return { game: best.game, isSpecific: false };
+  if (best.hasBoth) return { game: best.game, isSpecific: true };
+  return { game: best.game, isSpecific: best.score >= 3 };
+}
+
+function collectLocalEvidence(oddsData: unknown): SourceEvidence[] {
+  if (!Array.isArray(oddsData)) return [];
+  const out: SourceEvidence[] = [];
+  for (const row of oddsData) {
+    if (!isRecord(row)) continue;
+    const sourceUrl = row.source_url;
+    const fetchedAt = row.fetched_at;
+    const sourceType = row.source_type;
+    if (typeof sourceUrl !== "string" || typeof fetchedAt !== "string") continue;
+    if (typeof sourceType !== "string") continue;
+    if (!isPublicNonInternalUrl(sourceUrl)) continue;
+    out.push(buildSourceEvidence(sourceUrl, "local_slate", fetchedAt));
+  }
+  return out;
+}
+
+function buildScoreState(event: NormalizedEspnScoreboardEvent): MarketDataStatus {
+  const hasBookmakers = Array.isArray(event.bookmakers) && event.bookmakers.length > 0;
+  const validBookmakers = validateNoSyntheticOdds(event as { bookmakers?: Array<{ key?: unknown; title?: unknown }> });
+  if (hasBookmakers && validBookmakers) {
+    return { state: "grounded", code: "ESPN_GROUNDED", message: "ESPN-checked odds attached." };
+  }
+  if (hasBookmakers && !validBookmakers) {
+    return {
+      state: "partial",
+      code: "ODDS_UNAVAILABLE_BUT_GAME_GROUNDED",
+      message: "ESPN checked. Market odds not found yet.",
+      allowed_output: "score/state/simple pace only",
+    };
+  }
+  return ODDS_UNAVAILABLE_PARTIAL;
+}
+
+function buildBoardEvent(rawEvent: unknown, fetchedAt: string): BoardEvent | null {
+  const normalized = normalizeEspnScoreboardEvent(rawEvent, fetchedAt);
+  if (!validateRequiredEspnGroundingFields(normalized)) return null;
+
+  const marketDataStatus = buildScoreState(normalized);
+  if (marketDataStatus.state === "failed") return null;
+
+  const sourceEvidence = buildSourceEvidence(
+    normalized.source_url || ESPN_SCOREBOARD_URL,
+    "espn",
+    normalized.fetched_at || fetchedAt
+  );
+  const bookmakers = marketDataStatus.state === "grounded" && validateNoSyntheticOdds(normalized)
+    ? normalized.bookmakers
+    : [];
+
+  return {
+    ...normalized,
+    id: normalized.id || normalized.event_id,
+    sport_key: "baseball_mlb",
+    sport_title: normalized.league || "MLB",
+    commence_time: normalized.date || normalized.fetched_at || fetchedAt,
+    source_evidence: [sourceEvidence],
+    bookmakers,
+    market_data_status: {
+      ...marketDataStatus,
+      allowed_output: marketDataStatus.state === "grounded" ? marketDataStatus.allowed_output : ODDS_UNAVAILABLE_PARTIAL.allowed_output,
+    },
+    venue: normalized.venue,
+  };
+}
+
+function getSystemInstruction(
+  message: string,
+  selectedGame: BoardEvent | null,
+  boardForContext: BoardEvent[],
+  sportsSourceEvidence: SourceEvidence[],
+  requestScope: "game_level" | "general",
+  mode?: string | null
+): string {
+  const evidence = sportsSourceEvidence[0];
+  const evidenceLine = evidence
+    ? `ESPN checked source: ${evidence.source_url} (${evidence.freshness_status})`
+    : "ESPN checked source: not available";
+  const allowedMarketLine = selectedGame?.market_data_status?.state === "partial"
+    ? "Allowed output for this request is score/state/simple pace only."
+    : "Market context may include moneyline/spread/total only when attached from ESPN.";
+  const boardLine = boardForContext
+    .slice(0, requestScope === "game_level" ? 1 : boardForContext.length)
+    .map((entry) => ({
+      event_id: entry.event_id,
+      home_team: entry.home_team,
+      away_team: entry.away_team,
+      status: entry.status,
+      market_state: entry.market_data_status.state,
+      fetched_at: entry.fetched_at,
+      source_url: entry.source_url,
+    }));
+
+  const selected = selectedGame
+    ? {
+      event_id: selectedGame.event_id,
+      league: selectedGame.league,
+      date: selectedGame.date,
+      home_team: selectedGame.home_team,
+      away_team: selectedGame.away_team,
+      status: selectedGame.status,
+      inning: selectedGame.inning,
+      inning_half: selectedGame.inning_half,
+      source_url: selectedGame.source_url,
+      fetched_at: selectedGame.fetched_at,
+      market_data_status: selectedGame.market_data_status,
+    }
+    : null;
+
+  return `
+You are Baseline, an institutional sports assistant.
+Hard policy:
+1. ESPN checked context is authoritative and wins over local board state, screenshots, chat history, and memory.
+2. For game-level requests, you must match the question to a single ESPN game using team names, event id, or ESPN ids before answering.
+3. Local board data is not authoritative unless each object has source_url and fetched_at.
+4. If market odds are missing, answer only score/state/simple pace and do not claim market movement or edge.
+5. Do not expose internal governance terms (payload, grounding, synthetic odds, rpc, stack trace, raw source failures).
+6. PASS is a betting-decision term only; do not use it as a data-unavailable state.
+7. If a specific game is not confidently identified, return a refusal asking for clearer details.
+8. Use this exact phrase in surface-facing updates: "ESPN checked."
+
+User request scope: ${requestScope}
+Requested mode: ${mode || "auto"}
+
+ESPN source evidence:
+${JSON.stringify(evidenceLine)}
+
+Grounded board context:
+${JSON.stringify(boardLine)}
+
+Selected game context:
+${selected ? JSON.stringify(selected) : "None"}
+
+User input:
+${message}
+
+${allowedMarketLine}
+`;
+}
+
+function mapModelResponseText(response: unknown): string {
+  if (!response || typeof response !== "object") return "";
+  const candidateText = (response as { text?: unknown }).text;
+  if (typeof candidateText === "string") return candidateText;
+
+  const generated = (response as { candidates?: Array<{ content?: { parts?: Array<{ text?: unknown }> } }> });
+  if (Array.isArray(generated?.candidates)) {
+    return generated.candidates
+      .flatMap((candidate) => candidate?.content?.parts || [])
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join(" ")
+      .trim();
+  }
+
+  const output = (response as { output?: Array<{ parts?: Array<{ text?: string }> }> });
+  if (Array.isArray(output?.output)) {
+    return output.output
+      .flatMap((item) => item?.parts || [])
+      .map((part) => part.text)
+      .filter((part): part is string => typeof part === "string")
+      .join(" ");
+  }
+  return "";
+}
+
+async function requestAiResponse(
+  modelCandidates: string[],
+  aiRequest: {
+    message: string;
+    history: { role: "user" | "model"; text: string }[];
+    boardForContext: BoardEvent[];
+    sportsSourceEvidence: SourceEvidence[];
+    selectedGame: BoardEvent | null;
+    scope: "game_level" | "general";
+    mode?: string | null;
+    allowPartial: boolean;
+  }
+): Promise<string> {
+  const { message, history, selectedGame, boardForContext, sportsSourceEvidence, scope, mode, allowPartial } = aiRequest;
+  const systemInstruction = getSystemInstruction(
+    message,
+    selectedGame,
+    boardForContext,
+    sportsSourceEvidence,
+    scope,
+    mode
+  );
+
+  const ai = process.env.GEMINI_API_KEY
+    ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+    : new GoogleGenAI({
+        vertexai: true,
+        project: process.env.GOOGLE_CLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID || "gen-lang-client-0281999829",
+        location: process.env.GOOGLE_CLOUD_LOCATION || "us-central1",
+      });
+
+  const messages = [
+    ...history.map((entry) => ({
+      role: entry.role,
+      parts: [{ text: entry.text }],
+    })),
+    { role: "user", parts: [{ text: message }] },
+  ];
+
+  let response: unknown;
+  let lastError: unknown = null;
+
+  for (const candidate of modelCandidates) {
+    try {
+      const generate = ai.models.generateContent({
+        model: candidate,
+        contents: messages,
+        config: {
+          systemInstruction,
+          temperature: 0.1,
+        },
+      });
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Chat generation timed out")), CHAT_MODEL_TIMEOUT_MS)
+      );
+      response = await Promise.race([generate, timeout]);
+      break;
+    } catch (error: unknown) {
+      lastError = error;
+      if (isModelNotFoundError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (!response) {
+    throw lastError || new Error("No model response");
+  }
+
+  const candidateText = mapModelResponseText(response);
+  if (!candidateText) {
+    throw new Error("Model returned an empty response.");
+  }
+  return sanitizeAllowedOutput(candidateText, allowPartial);
+}
+
+function failPayload(
+  res: express.Response,
+  code: FailureState["code"],
+  message: string,
+  sourceEvidence: SourceEvidence[] = [],
+  allowedOutput?: string
+) {
+  const failure = buildFailureState(code, message, { source_evidence: sourceEvidence, allowed_output: allowedOutput });
+  return res.status(422).json({ error: failure.message, failure_state: failure });
+}
+
+async function fetchEspnBoard(): Promise<{ board: BoardEvent[]; evidence: SourceEvidence[]; fetchedAt: string }> {
+  const fetchedAt = new Date().toISOString();
+  const response = await axios.get(ESPN_SCOREBOARD_URL, { timeout: 10_000 });
+  const events = Array.isArray(response.data?.events) ? response.data.events : [];
+  const board = events
+    .map((event) => buildBoardEvent(event, fetchedAt))
+    .filter((entry): entry is BoardEvent => Boolean(entry));
+
+  const evidence = [buildSourceEvidence(ESPN_SCOREBOARD_URL, "espn", fetchedAt)];
+  return { board, evidence, fetchedAt };
+}
+
+function buildPayloadForGeneral(
+  message: string,
+  evidence: SourceEvidence[]
+): PayloadContract {
+  const payload = {
+    canonical_url: ESPN_SCOREBOARD_HOME,
+    request_text: message,
+    request_scope: "general" as const,
+    source_evidence: evidence,
+    generated_at: new Date().toISOString(),
+  };
+  return payload;
+}
+
+function buildPayloadForGame(
+  message: string,
+  selectedGame: BoardEvent,
+  evidence: SourceEvidence[]
+): PayloadContract {
+  const grounding: EspnGameGrounding = {
+    event_id: selectedGame.event_id,
+    league: selectedGame.league,
+    date: selectedGame.date,
+    home_team: selectedGame.home_team,
+    away_team: selectedGame.away_team,
+    status: selectedGame.status,
+    fetched_at: selectedGame.fetched_at,
+    source_url: selectedGame.source_url,
+    inning: selectedGame.inning,
+    inning_half: selectedGame.inning_half,
+  };
+
+  return {
+    canonical_url: selectedGame.source_url || ESPN_SCOREBOARD_HOME,
+    request_text: message,
+    request_scope: "game_level",
+    espn_grounding: grounding,
+    source_evidence: evidence,
+    generated_at: new Date().toISOString(),
+  };
+}
+
+function normalizeMarketEvidenceText(board: BoardEvent[]): string {
+  const primary = board[0];
+  if (!primary) return "";
+  const at = primary.market_data_status.state === "partial" ? "ESPN checked. Market odds not found yet." : "";
+  return at ? `${at} ` : "";
+}
 
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000", 10);
+  const firebaseProjectId =
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    "gen-lang-client-0281999829";
+  ensureFirebaseAdminInitialized(firebaseProjectId);
 
-  app.use(express.json());
+  const allowedOrigins = new Set<string>([
+    "https://baseline-mlb-xqs7h463qa-uc.a.run.app",
+    "https://baseline-mlb-70323048967.us-central1.run.app",
+    "http://localhost:5000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5000",
+  ]);
 
-  // MCP Server Setup
-  const mcpServer = new McpServer({
-    name: "baseline-mlb",
-    version: "1.0.0"
+  if (process.env.APP_URL) {
+    try {
+      allowedOrigins.add(new URL(process.env.APP_URL).origin);
+    } catch {
+      // no-op
+    }
+  }
+
+  app.use((req, res, next) => {
+    const origin = req.header("origin");
+    if (origin && allowedOrigins.has(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+      res.header("Access-Control-Allow-Credentials", "true");
+      res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    }
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
   });
 
-  // Transport state
-  let transport: SSEServerTransport | null = null;
+  app.use(express.json({ limit: "1mb" }));
 
+  const paymentIntentRequestSchema = z.object({
+    amount: z.number().finite().min(MIN_PAYMENT_AMOUNT_USD).max(MAX_PAYMENT_AMOUNT_USD),
+  });
 
-  // API Routes
-  
+  const chatRequestSchema = z.object({
+    message: z.string().trim().min(1).max(MAX_CHAT_MESSAGE_CHARS),
+    history: z
+      .array(
+        z.object({
+          role: z.enum(["user", "model"]),
+          text: z.string().trim().max(MAX_CHAT_HISTORY_ITEM_CHARS),
+        })
+      )
+      .max(MAX_CHAT_HISTORY_ITEMS)
+      .optional(),
+    oddsData: z.unknown().optional(),
+    mode: z.enum(["live", "stats", "trends"]).nullable().optional(),
+    input_sources: z.array(z.enum(["text", "screenshot", "local_slate"])).optional(),
+    canonical_url: z.string().url().optional(),
+  });
+
+  const mcpServer = new McpServer({
+    name: "baseline-mlb",
+    version: "1.0.0",
+  });
+  const mcpTransports = new Map<string, SSEServerTransport>();
+
   // 1. Stripe Checkout / Payment Intent
   app.post("/api/create-payment-intent", async (req, res) => {
     try {
-      const { amount } = req.body;
+      const authUser = await requireAuthenticatedUser(req);
+      if (!authUser) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const parsed = paymentIntentRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid payment request" });
+      }
+
+      const { amount } = parsed.data;
       const stripeSecret = process.env.STRIPE_SECRET_KEY;
-      
       if (!stripeSecret) {
         return res.status(500).json({ error: "Stripe secret key not configured" });
       }
 
       const stripe = new Stripe(stripeSecret);
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(amount * 100), // convert to cents
+        amount: Math.round(amount * 100),
         currency: "usd",
         automatic_payment_methods: { enabled: true },
+        metadata: { firebase_uid: authUser.uid },
       });
 
       res.json({ clientSecret: paymentIntent.client_secret });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (error: unknown) {
+      console.error("Payment Intent Error:", error);
+      const message = error instanceof Error ? error.message : "Unknown payment error";
+      res.status(500).json({ error: message });
     }
   });
 
-  // Helper to fetch live odds
-  const getLiveOdds = async (sport = 'upcoming', regions = 'us', markets = 'h2h') => {
-    const apiKey = process.env.ODDS_API_KEY;
-    if (!apiKey) {
-      // Fallback to ESPN live scoreboard data if no ODDS_API_KEY
-      try {
-        const espnRes = await axios.get("https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard");
-        const events = espnRes.data.events || [];
-        
-        const formatted = events.map((event: any) => {
-          const comp = event.competitions[0];
-          const homeTeamObj = comp.competitors.find((c: any) => c.homeAway === "home");
-          const awayTeamObj = comp.competitors.find((c: any) => c.homeAway === "away");
-          const homeTeam = homeTeamObj?.team.displayName || "Unknown";
-          const awayTeam = awayTeamObj?.team.displayName || "Unknown";
-          
-          const state = event.status.type.state; // "pre", "in", "post"
-          let status = "upcoming";
-          if (state === "in") status = "live";
-          if (state === "post") status = "final";
-
-          let score = "";
-          if (state === "in" || state === "post") {
-             const homeScore = homeTeamObj?.score || "0";
-             const awayScore = awayTeamObj?.score || "0";
-             score = `${awayTeamObj?.team.abbreviation} ${awayScore} - ${homeTeamObj?.team.abbreviation} ${homeScore}`;
-          }
-
-          const homeProbableNode = homeTeamObj?.probables?.find((p: any) => p.name === 'probableStartingPitcher') || homeTeamObj?.probables?.[0];
-          const awayProbableNode = awayTeamObj?.probables?.find((p: any) => p.name === 'probableStartingPitcher') || awayTeamObj?.probables?.[0];
-          
-          const homeProbable = homeProbableNode?.athlete?.shortName || homeProbableNode?.athlete?.displayName;
-          const awayProbable = awayProbableNode?.athlete?.shortName || awayProbableNode?.athlete?.displayName;
-          
-          const homeProbableHeadshot = homeProbableNode?.athlete?.headshot?.href || homeProbableNode?.athlete?.headshot || null;
-          const awayProbableHeadshot = awayProbableNode?.athlete?.headshot?.href || awayProbableNode?.athlete?.headshot || null;
-          
-          const homeProbableRecord = homeProbableNode?.record || "";
-          const awayProbableRecord = awayProbableNode?.record || "";
-          
-          let context = "";
-          if (homeProbable && awayProbable) context = `${awayProbable} vs ${homeProbable}`;
-
-          // Parse ESPN Odds if available
-          const epsnOdds = comp.odds?.[0];
-          let bookmakers = [];
-          
-          if (epsnOdds && state !== "post") {
-            const markets = [];
-            if (epsnOdds.details) {
-               markets.push({ key: "h2h", outcomes: [{ name: homeTeam, price: epsnOdds.details }, { name: awayTeam, price: "N/A" }]}); // Just text based 
-            }
-            if (epsnOdds.overUnder) {
-               markets.push({ key: "totals", outcomes: [{ name: "Over", price: -110, point: epsnOdds.overUnder }]});
-            }
-            bookmakers.push({ 
-              key: "espn_odds", 
-              title: epsnOdds.provider?.name || "DraftKings",
-              markets 
-            });
-          }
-
-          // Generate synthetic odds for demonstration if none exist 
-          if (bookmakers.length === 0) {
-            // deterministic baseline based on team string length
-            const homeBaseline = homeTeam.length % 2 === 0 ? -150 : 130;
-            const awayBaseline = homeBaseline === -150 ? 130 : -150;
-            const totalScore = (homeTeam.length + awayTeam.length) % 5 + 7.5;
-            
-            bookmakers.push({
-              key: "synthetic_odds",
-              title: "DraftKings",
-              markets: [
-                {
-                  key: "h2h",
-                  outcomes: [
-                    { name: homeTeam, price: homeBaseline },
-                    { name: awayTeam, price: awayBaseline }
-                  ]
-                },
-                {
-                   key: "spreads",
-                   outcomes: [
-                     { name: homeTeam, price: homeBaseline < 0 ? -110 : -110, point: homeBaseline < 0 ? -1.5 : 1.5 },
-                     { name: awayTeam, price: homeBaseline < 0 ? -110 : -110, point: homeBaseline < 0 ? 1.5 : -1.5 }
-                   ]
-                },
-                {
-                  key: "totals",
-                  outcomes: [
-                    { name: "Over", price: -110, point: totalScore },
-                    { name: "Under", price: -110, point: totalScore }
-                  ]
-                }
-              ]
-            });
-          }
-
-          const fetchedAt = new Date().toISOString();
-          return {
-            id: event.id,
-            sport_key: "baseball_mlb",
-            sport_title: "MLB",
-            commence_time: event.date,
-            home_team: homeTeam,
-            away_team: awayTeam,
-            home_score: state === "in" || state === "post" ? homeTeamObj?.score || "0" : undefined,
-            away_score: state === "in" || state === "post" ? awayTeamObj?.score || "0" : undefined,
-            status,
-            score,
-            situation: status === "live" ? event.status.type.detail : undefined,
-            inning: status === "live" ? event.status.period : undefined,
-            inning_half: status === "live" ? (event.status.type.detail.includes("Top") ? "Top" : event.status.type.detail.includes("Bot") ? "Bottom" : undefined) : undefined,
-            context: status === "upcoming" ? context : undefined,
-            home_pitcher: homeProbable,
-            away_pitcher: awayProbable,
-            home_pitcher_headshot: typeof homeProbableHeadshot === 'string' ? homeProbableHeadshot : undefined,
-            away_pitcher_headshot: typeof awayProbableHeadshot === 'string' ? awayProbableHeadshot : undefined,
-            home_pitcher_record: homeProbableRecord,
-            away_pitcher_record: awayProbableRecord,
-            venue: comp.venue?.fullName,
-            bookmakers,
-            fetched_at: fetchedAt,
-            source_url: `https://www.espn.com/mlb/game/_/gameId/${event.id}`
-          };
-        });
-        
-        return formatted;
-      } catch (e: any) {
-         console.error("ESPN Fallback failed:", e.message);
-         return [];
-      }
-    }
-
-    const response = await axios.get(`https://api.the-odds-api.com/v4/sports/${sport}/odds`, {
-      params: { apiKey, regions, markets }
-    });
-    return response.data;
-  };
-
-  // 2. Fetch Odds Proxy
-  app.get("/api/odds", async (req, res) => {
+  // 2. Fetch Odds Proxy (ESPN only)
+  app.get("/api/odds", async (_req, res) => {
     try {
-      const { sport = 'upcoming', regions = 'us', markets = 'h2h' } = req.query;
-      const data = await getLiveOdds(sport as string, regions as string, markets as string);
-      res.json(data);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      const { board } = await fetchEspnBoard();
+      res.json(board);
+    } catch (error: unknown) {
+      console.error("Odds Fetch Error:", error);
+      const message = error instanceof Error ? error.message : "Unknown odds fetch error";
+      res.status(500).json({ error: message });
     }
   });
 
-  // Chat Endpoint for Gemini
+  // 3. Chat Endpoint for Gemini (ESPN-first)
   app.post("/api/chat", async (req, res) => {
+    const auditLog: Array<ReturnType<typeof buildAuditEvent>> = [];
+
     try {
-      const { message, history, oddsData, mode } = req.body;
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ 
-        vertexai: {
-          project: process.env.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0281999829',
-          location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1'
+      const authUser = await requireAuthenticatedUser(req);
+      if (!authUser) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const parsed = chatRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: "Invalid chat payload" });
+      }
+
+      if (!isWithinBurstLimit(authUser.uid)) {
+        return res.status(429).json({ error: "Too many chat requests. Please slow down." });
+      }
+
+      const planTier = await getTrustedUserPlanTier(authUser.uid);
+      if (!isPaidPlan(planTier)) {
+        const count = await getAndIncrementDailyChatUsage(authUser.uid);
+        if (count > FREE_DAILY_CHAT_LIMIT) {
+          return res.status(429).json({ error: "Daily query limit reached for this account." });
         }
+      }
+
+    const { message, history = [], oddsData, mode, input_sources, canonical_url } = parsed.data;
+    const normalizedHistory = history.slice(-MAX_CHAT_HISTORY_ITEMS).map((entry) => ({
+      role: entry.role,
+      text: entry.text,
+    }));
+
+      const isGameLevelRequest = isGameLevelSportsRequest(message);
+      const hasLocalSlateContext = Array.isArray(oddsData) && oddsData.length > 0;
+      const hasScreenshotSourceHint = Array.isArray(input_sources) && input_sources.includes("screenshot");
+      const isScreenshotOnly = isScreenshotOnlyInputLike(message, hasLocalSlateContext || hasScreenshotSourceHint);
+      const shouldRefreshEsnp = isGameLevelRequest || isGeneralSlateQuery(message);
+
+      let board: BoardEvent[] = [];
+      let sportsSourceEvidence: SourceEvidence[] = [];
+      let selectedGame: BoardEvent | null = null;
+      let payloadContract: PayloadContract | null = null;
+
+      if (shouldRefreshEsnp) {
+        let espnFetch: { board: BoardEvent[]; evidence: SourceEvidence[]; fetchedAt: string };
+        try {
+          espnFetch = await fetchEspnBoard();
+          board = espnFetch.board;
+          sportsSourceEvidence = espnFetch.evidence;
+          const primaryEvidence = buildSourceEvidence(
+            ESPN_SCOREBOARD_URL,
+            "espn",
+            espnFetch.fetchedAt
+          );
+          sportsSourceEvidence.push(primaryEvidence);
+          auditLog.push(
+            buildAuditEvent("espn_board_fetch", "allow", {
+              events: String(board.length),
+              fetched_at: espnFetch.fetchedAt,
+            })
+          );
+        } catch (error: unknown) {
+          if (isScreenshotOnly) {
+            return failPayload(
+              res,
+              "SCREENSHOT_ONLY_INPUT_BLOCKED",
+              "I can only answer screenshot-based game requests after ESPN grounding succeeds in-session.",
+              sportsSourceEvidence
+            );
+          }
+          return failPayload(
+            res,
+            "ESPN_SOURCE_FAILURE",
+            "Could not refresh ESPN grounding for this request. Please retry in a moment.",
+            sportsSourceEvidence
+          );
+        }
+
+        if (board.length === 0 && isGameLevelRequest) {
+          return failPayload(
+            res,
+            "ESPN_GROUNDING_REQUIRED",
+            "ESPN returned no active slate at this time.",
+            sportsSourceEvidence
+          );
+        }
+
+        const stale = sportsSourceEvidence.find((entry) => isSourceStale(entry));
+        if (isGameLevelRequest && stale) {
+          return failPayload(
+            res,
+            "ESPN_SOURCE_STALE",
+            "ESPN grounding is stale. Refreshing again may be needed before answering.",
+            sportsSourceEvidence
+          );
+        }
+
+        if (isGameLevelRequest) {
+          const selection = selectEspnGameForMessage(message, board);
+          if (!selection) {
+            return failPayload(
+              res,
+              "ESPN_GROUNDING_REQUIRED",
+              "I could not map your request to an ESPN game in the current board.",
+              sportsSourceEvidence
+            );
+          }
+
+          if (!selection.isSpecific) {
+            return failPayload(
+              res,
+              "UNKNOWN_SPORTS_ROUTE",
+              "I found a slate match but not a specific game. Include both teams or the event id.",
+              sportsSourceEvidence
+            );
+          }
+
+          selectedGame = selection.game;
+          if (!validateRequiredEspnGroundingFields(selectedGame)) {
+            return failPayload(
+              res,
+              "ESPN_GROUNDING_INVALID",
+              "ESPN grounding could not be validated for that game.",
+              sportsSourceEvidence
+            );
+          }
+
+          if (!isGroundingFresh(selectedGame, Date.now())) {
+            return failPayload(
+              res,
+              "ESPN_SOURCE_STALE",
+              "ESPN grounding is stale. Please retry after refresh.",
+              sportsSourceEvidence
+            );
+          }
+
+          const localEvidence = collectLocalEvidence(oddsData);
+          if (localEvidence.length) {
+            sportsSourceEvidence.push(...localEvidence);
+          }
+          if (selectedGame.market_data_status.state === "failed") {
+            return failPayload(
+              res,
+              "ESPN_SOURCE_FAILURE",
+              "ESPN grounding has failed. Cannot produce market-anchored answer.",
+              sportsSourceEvidence
+            );
+          }
+
+          const payloadCheck = buildPayloadForGame(message, selectedGame, sportsSourceEvidence);
+          payloadContract = payloadCheck;
+        } else {
+          const payloadCheck = buildPayloadForGeneral(message, sportsSourceEvidence);
+          payloadContract = payloadCheck as unknown as PayloadContract;
+        }
+      } else {
+        const localEvidence = collectLocalEvidence(oddsData);
+        if (localEvidence.length) sportsSourceEvidence.push(...localEvidence);
+      }
+
+      const requestedModel = process.env.GEMINI_MODEL || DEFAULT_CHAT_MODEL;
+      const candidates = getChatModelCandidates(requestedModel);
+      const allowPartial = !!selectedGame && selectedGame.market_data_status.state === "partial";
+
+      const responseText = await requestAiResponse(candidates, {
+        message,
+        history: normalizedHistory,
+        boardForContext: board,
+        sportsSourceEvidence: sportsSourceEvidence,
+        selectedGame,
+        scope: isGameLevelRequest ? "game_level" : "general",
+        mode,
+        allowPartial,
       });
 
-      const systemInstruction = `
-        You are Baseline, a direct institutional market data and statistical sports analysis engine. 
-        Your goal is to provide raw data analysis, explain market anchors (odds), and present statistical probabilities for MLB and other major sports.
-        
-        IMPORTANT: You should frequently output Markdown tables with dense numerical metrics for probabilities and data points. These tables will be automatically rendered as heatmaps in the UI, so use positive and negative values (like +/- EV, Score diff, etc.) where appropriate to create a great visual experience.
+      const evidenceLine = buildScoreStateEvidenceMessage(board);
+      let finalText = responseText ? `${responseText}` : "No publishable answer is available right now.";
 
-        Current available board context: ${JSON.stringify(oddsData || "No real-time market data available yet.")}
-        Current Analysis Mode: ${mode || 'auto'}
-        
-        Protocol:
-        1. Be strictly analytical and objective. Avoid friendly "AI assistant" tropes.
-        2. Format responses with records and percentages concisely. 
-        3. Include records (overall and split), totals, and trend averages.
-        4. Example output format: "Dodgers 16-7 overall, 7-4 road. Total 8.5. Last 10 road games averaging 7.2 combined, 7-3 under. Lean under 8.5."
-        5. Be extremely concise. Use professional terminology.
-        6. Always note that projections are probabilistic.
-        7. If the mode is 'live', focus heavily on current live scores, in-game pace, and live odds scenarios.
-        8. If the mode is 'stats', focus on historical matching, split records, and detailed situational data. Include current moneyline and total odds with each game when grounded data has them using the format: "Total 8.5 (-110 over / -110 under), ML PHI -135 / ATH +118".
-        9. If the mode is 'trends', focus on line movement, over/under frequencies, and recent streaks.
-        10. If the user asks for advanced simulation, deep data modeling, or explicit code generation, you MUST write Python code to perform the analysis. 
-            Wrap all python analytical code in standard markdown codeblocks like \`\`\`python
-            Use pandas, numpy, and scipy for sports analytics within the code.
-        11. If the user asks you to write a document, generate a report, or create a visual artifact, you MUST write clean, styled HTML code. 
-            Wrap the HTML in standard markdown codeblocks like \`\`\`html
-            Include inline CSS within a <style> tag. Change the document title to the matchup name (e.g., "TEX 4 - HOU 2"). Skip institutional framing.
-        12. For live games and today's games, you MUST ground your analysis against real-time data using ESPN's URL taxonomy. Use Google Search to query specific game URLs (e.g., site:espn.com inurl:boxscore) or scoreboard pages to guarantee accurate live stats and current states.
-        13. MLB Live Score Formatter Rule (SPORTS.MLB.LIVE_FORMATTER.001):
-            - Format: For live MLB games, always render games as "Away Team @ Home Team". Always pair away_score with away_team and home_score with home_team. Include inning/status and fetched_at timestamp when available.
-            - Priority Grounding Data: You must prioritize fetching and displaying the current inning, outs, base runner status, and pitching info (e.g. is the pitcher wavering).
-            - Live Odds: You must integrate the current moneyline and total odds dynamically as they update.
-            - Terminology Gate: Ban market phrases unless an actual market source is attached. Do NOT use "win probability," "moneyline advantage," "live market anchor," "live total adjusted," "heavily adjusted to the over," or "market indicates" from score-only data.
-            - Allowed from score-only: "current score", "inning", "outs", "base state", "simple run pace", "score-based game context". Keep pace math, but label it as simple pace math, not market intel.
-      `;
+      if (allowPartial && !isScoreOnlyOutputContext(finalText)) {
+        finalText = sanitizeScoreOnlyOutput(finalText);
+      }
+      if (evidenceLine) {
+        finalText = `${finalText}\n\n${evidenceLine}`.trim();
+      }
 
-      const contents = [
-        ...(history || []).map((m: any) => ({ role: m.role, parts: [{ text: m.text }] })),
-        { role: 'user', parts: [{ text: message }] }
-      ];
+      if (isAllowedPassOutput(finalText) || /PASS\s*-\s*data unavailable/i.test(finalText)) {
+        return failPayload(
+          res,
+          "PASS_MISUSED_FOR_DATA_UNAVAILABLE",
+          "PASS is a betting-decision state only. Grounding status now validates data availability.",
+          sportsSourceEvidence
+        );
+      }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.1,
-          tools: [{ googleSearch: {} }]
+      if (selectedGame && payloadContract) {
+        const contractCheck = PayloadContractSchema.safeParse(payloadContract);
+        if (!contractCheck.success) {
+          return failPayload(res, "ESPN_GROUNDING_INVALID", "Payload contract validation failed.", sportsSourceEvidence);
         }
-      });
+        payloadContract = contractCheck.data as PayloadContract;
+      }
 
-      res.json({ text: response.text });
-    } catch (error: any) {
+      const payloadEvidence = sportsSourceEvidence.length ? sportsSourceEvidence : [buildSourceEvidence(ESPN_SCOREBOARD_HOME, "espn", new Date().toISOString())];
+      const stateCheck = SportsAnswerStateSchema.safeParse({
+        state: "ready",
+        answer_text: finalText,
+        payload:
+          payloadContract ??
+          ({
+            canonical_url: canonical_url || ESPN_SCOREBOARD_HOME,
+            request_text: message,
+            request_scope: "general",
+            source_evidence: payloadEvidence,
+            generated_at: new Date().toISOString(),
+          } as PayloadContract),
+        source_evidence: payloadEvidence,
+        audit: auditLog,
+      });
+      if (!stateCheck.success) {
+        return failPayload(
+          res,
+          "ESPN_GROUNDING_INVALID",
+          "Prepared output did not pass governance validation.",
+          payloadEvidence
+        );
+      }
+
+      res.json({
+        text: finalText,
+        source_evidence: payloadEvidence,
+        payload_contract: payloadContract,
+        audit: auditLog,
+      });
+    } catch (error: unknown) {
       console.error("Baseline Chat Error:", error);
-      res.status(500).json({ error: error.message });
+      const message = error instanceof Error ? error.message : "Chat request failed.";
+      const upstreamCode = extractUpstreamErrorCode(error);
+      const upstreamStatus = extractUpstreamStatus(error);
+      if (message.includes("timed out")) return res.status(504).json({ error: "Chat model timed out. Please retry." });
+      if (upstreamStatus === 401 || upstreamCode === "401") {
+        return res.status(503).json({ error: "Authentication to the model service failed. Please retry shortly." });
+      }
+      if (upstreamStatus === 403 || upstreamCode === "403" || upstreamCode === "PERMISSION_DENIED" || message.includes("SERVICE_DISABLED")) {
+        return res.status(503).json({ error: "Enable Vertex AI and required services for Gemini." });
+      }
+      if (upstreamStatus === 429 || upstreamCode === "429") {
+        return res.status(503).json({ error: "Model service is rate-limited right now. Please retry shortly." });
+      }
+      if (upstreamCode === "NOT_FOUND" || upstreamStatus === 404 || message.includes("not found or your project does not have access")) {
+        return res.status(503).json({ error: "Configured Gemini model is not available." });
+      }
+      return res.status(500).json({ error: message || "Chat request failed." });
     }
   });
 
-  // 3. SSE Stream for Live Odds
+  // 4. SSE Stream for live board
   app.get("/api/stream/odds", async (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
-    
+
     let isClosed = false;
     req.on("close", () => {
       isClosed = true;
     });
-    
+
     const sendOdds = async () => {
       if (isClosed) return;
       try {
-        const { sport = 'upcoming', regions = 'us', markets = 'h2h' } = req.query;
-        const data = await getLiveOdds(sport as string, regions as string, markets as string);
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        const data = await fetchEspnBoard();
+        res.write(`data: ${JSON.stringify(data.board)}\n\n`);
 
-        // Determine next poll interval
-        let nextInterval = 60000; // default 60s for Final (then practically stops fast polling)
+        let nextInterval = 60_000;
         let hasLive = false;
         let hasUpcoming = false;
-
-        for (const game of data) {
-          if (game.status === 'live') {
+        for (const game of data.board) {
+          if (game.status === "live") {
             hasLive = true;
-            break; // highest priority cadence
-          } else if (game.status === 'upcoming') {
+            break;
+          }
+          if (game.status === "upcoming") {
             hasUpcoming = true;
           }
         }
 
         if (hasLive) {
-          nextInterval = 5000; // 5s for live
+          nextInterval = 5_000;
         } else if (hasUpcoming) {
-          nextInterval = 15000; // 15s for pregame
+          nextInterval = 15_000;
         }
-
         setTimeout(sendOdds, nextInterval);
-      } catch (error: any) {
-        console.error("SSE Error:", error.message);
-        setTimeout(sendOdds, 15000);
+      } catch (error: unknown) {
+        console.error("SSE Error:", error);
+        setTimeout(sendOdds, 15_000);
       }
     };
-    
+
     sendOdds();
   });
 
   // MCP GET Endpoint for SSE
-  app.get("/mcp", async (req, res) => {
-    transport = new SSEServerTransport("/mcp/messages", res);
+  app.get("/mcp", async (_req, res) => {
+    const transport = new SSEServerTransport("/mcp/messages", res);
+    const sessionId = (transport as unknown as { sessionId?: string }).sessionId;
+    if (!sessionId) {
+      res.status(500).send("Unable to initialize MCP session");
+      return;
+    }
+    mcpTransports.set(sessionId, transport);
+    res.on("close", () => {
+      mcpTransports.delete(sessionId);
+    });
     await mcpServer.connect(transport);
   });
 
   // MCP POST Endpoint for messages
   app.post("/mcp/messages", async (req, res) => {
-    if (transport) {
-      await transport.handlePostMessage(req, res);
-    } else {
-      res.status(500).send("Transport not initialized");
+    const sessionIdRaw = req.query.sessionId;
+    const sessionId = typeof sessionIdRaw === "string" ? sessionIdRaw : undefined;
+    if (!sessionId) {
+      return res.status(400).send("Missing sessionId");
     }
+
+    const transport = mcpTransports.get(sessionId);
+    if (!transport) {
+      return res.status(404).send("Session not found");
+    }
+    await transport.handlePostMessage(req, res);
   });
 
-  // Register MCP Tools
-  mcpServer.tool("get_slate", "Returns today's games", 
+  mcpServer.tool(
+    "get_slate",
+    "Returns today's games",
     { date: z.string().optional().describe("Date in YYYY-MM-DD") },
     async ({ date }) => {
-      const data = await getLiveOdds('upcoming', 'us', 'h2h');
+      const slate = await (async () => (await fetchEspnBoard()).board)();
       return {
-        content: [{ type: "text", text: `Slate for ${date || 'today'}: ` + JSON.stringify(data) }]
+        content: [
+          {
+            type: "text",
+            text: `Slate for ${date || "today"}: ` + JSON.stringify(slate),
+          },
+        ],
       };
     }
   );
 
-  mcpServer.tool("get_game", "Returns specific game state and odds",
+  mcpServer.tool(
+    "get_game",
+    "Returns specific game state and odds",
     { game_id: z.string() },
     async ({ game_id }) => {
-      const data = await getLiveOdds('upcoming', 'us', 'h2h');
-      const game = data.find((d: any) => d.id === game_id);
+      const slate = await (async () => (await fetchEspnBoard()).board)();
+      const game = slate.find((entry) => entry.id === game_id || entry.event_id === game_id);
       return {
-        content: [{ type: "text", text: game ? JSON.stringify(game) : "Game not found" }]
+        content: [
+          {
+            type: "text",
+            text: game ? JSON.stringify(game) : "Game not found",
+          },
+        ],
       };
     }
   );
 
-  mcpServer.tool("get_team_record", "Returns team current record",
+  mcpServer.tool(
+    "get_team_record",
+    "Returns team current record",
     { team_abbr: z.string() },
     async ({ team_abbr }) => {
-       return {
-         content: [{ type: "text", text: `Record for ${team_abbr} is currently not available via this tool.` }]
-       };
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Record for ${team_abbr} is currently not available via this tool.`,
+          },
+        ],
+      };
     }
   );
 
-  mcpServer.tool("get_pitcher_matchup", "Returns matchup analysis",
+  mcpServer.tool(
+    "get_pitcher_matchup",
+    "Returns matchup analysis",
     { home_pitcher: z.string(), away_pitcher: z.string() },
     async ({ home_pitcher, away_pitcher }) => {
-       return {
-         content: [{ type: "text", text: `Matchup analysis between ${home_pitcher} and ${away_pitcher} is pending.` }]
-       };
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Matchup analysis between ${home_pitcher} and ${away_pitcher} is pending.`,
+          },
+        ],
+      };
     }
   );
 
@@ -406,4 +1252,6 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+startServer().catch((error) => {
+  console.error("Failed to start server:", error);
+});

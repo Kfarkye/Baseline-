@@ -1,0 +1,16 @@
+{
+  "event_id": "401815214",
+  "league": "MLB",
+  "date": "2026-05-06T01:40:00Z",
+  "home_team": "Philadelphia Phillies",
+  "away_team": "Baltimore Orioles",
+  "status": "final",
+  "fetched_at": "2026-05-06T01:45:00Z",
+  "source_url": "https://www.espn.com/mlb/game/_/gameId/401815214",
+  "bookmakers": [
+    {
+      "key": "espn",
+      "title": "ESPN"
+    }
+  ]
+}

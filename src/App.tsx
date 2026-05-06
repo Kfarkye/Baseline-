@@ -18,10 +18,13 @@ import {
 } from 'lucide-react';
 import { auth, db } from './lib/firebase';
 import { 
-  signInWithPopup, 
+  browserLocalPersistence,
+  getRedirectResult,
   signInWithRedirect,
+  signInWithPopup,
   GoogleAuthProvider, 
   onAuthStateChanged, 
+  setPersistence,
   signOut,
   User as FirebaseUser
 } from 'firebase/auth';
@@ -32,16 +35,16 @@ import {
   collection, 
   addDoc, 
   query, 
-  orderBy, 
   onSnapshot,
   serverTimestamp,
   updateDoc,
   where
 } from 'firebase/firestore';
 import { cn, formatCurrency } from './lib/utils';
-import { BrowserRouter, Routes, Route, useNavigate, useParams, Link } from 'react-router-dom';
+import { Routes, Route, useNavigate, useParams, Link } from 'react-router-dom';
 import { fetchCurrentOdds, listenToLiveOdds, SportOdds } from './services/oddsService';
 import { getBettingInsights, ChatMessage } from './services/geminiService';
+import { APP_SHELL_LINKS, IOS_WRAPPER_NOTE } from './lib/appShellConfig';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -117,6 +120,76 @@ export const getEspnLogo = (teamName: string) => {
     : `https://api.dicebear.com/7.x/identicon/svg?seed=${teamName}&backgroundColor=FAF9F6&fontFamily=serif`;
 };
 
+const BANNED_CONSUMER_PATTERNS: RegExp[] = [
+  /confidence\s*score\s*:?[^\n]*/gi,
+  /edge\s*score\s*:?[^\n]*/gi,
+  /raw\s*rpc\s*names?\s*:?[^\n]*/gi,
+  /internal\s*payload\s*names?\s*:?[^\n]*/gi,
+  /payload\s*contract\s*:?[^\n]*/gi,
+  /grounding/gi,
+  /governance/gi,
+  /sportsanswerstate\s*:?[^\n]*/gi,
+  /failurestate\s*:?[^\n]*/gi,
+  /auditevent\s*:?[^\n]*/gi,
+  /\bquant\s*language\b/gi,
+];
+
+function sanitizeConsumerSportsText(text: string): string {
+  let sanitized = text;
+  for (const pattern of BANNED_CONSUMER_PATTERNS) {
+    sanitized = sanitized.replace(pattern, "");
+  }
+  sanitized = sanitized
+    .replace(/\bmoneyline\b/gi, "")
+    .replace(/\bspread\b/gi, "")
+    .replace(/\bover\s*\/\s*under\b/gi, "")
+    .replace(/\bover\b/gi, "")
+    .replace(/\bunder\b/gi, "")
+    .replace(/\btotal\b/gi, "")
+    .replace(/\bodds?\b/gi, "")
+    .replace(/\bPASS\b/g, "")
+    .replace(/\bsource failure\b/gi, "");
+  sanitized = sanitized.replace(/\n{3,}/g, "\n\n").trim();
+  return sanitized || "No publishable answer is available right now.";
+}
+
+function formatEsportsTimestamp(input?: string): string {
+  if (!input) return "";
+  const parsed = Date.parse(input);
+  if (Number.isNaN(parsed)) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(parsed);
+}
+
+function describeOddsLine(odd: SportOdds): string {
+  if (odd.market_data_status?.state !== "partial") return "";
+  return `ESPN checked • Market odds not found yet • ${formatEsportsTimestamp(odd.fetched_at) || "updated now"}`;
+}
+
+function buildAuthErrorMessage(errorCode: string): string {
+  if (errorCode === "auth/unauthorized-domain") {
+    return `Sign-in was blocked for ${window.location.hostname}. Ask an admin to add this domain under Firebase Auth and OAuth authorized domains/origins.`;
+  }
+  if (errorCode === "auth/popup-blocked") {
+    return "Popup was blocked. Trying sign-in by redirect.";
+  }
+  if (errorCode === "auth/web-storage-unsupported") {
+    return "This browser cannot complete popup sign-in. Try a supported browser.";
+  }
+  if (errorCode === "auth/operation-not-supported-in-this-environment") {
+    return "Popup sign-in is not supported in this environment. Trying redirect.";
+  }
+  if (errorCode === "auth/cancelled-popup-request") {
+    return "Sign-in popup was cancelled.";
+  }
+  return `Sign-in failed: ${errorCode}`;
+}
+
 function PitcherDisplay({ teamFull, headshot, name, record, alignRight = false, small = false }: { teamFull: string, headshot?: string, name?: string, record?: string, alignRight?: boolean, small?: boolean }) {
   const teamAbbr = MLB_TEAM_MAP[teamFull as keyof typeof MLB_TEAM_MAP] || teamFull.substring(0, 3);
   const fallbackImg = `https://api.dicebear.com/7.x/initials/svg?seed=${name || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`;
@@ -157,8 +230,25 @@ export default function App() {
   const [sharedArtifact, setSharedArtifact] = useState<string | null>(null);
   const [isLoadingArtifact, setIsLoadingArtifact] = useState(false);
   const [artifactsList, setArtifactsList] = useState<ArtifactMeta[]>([]);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    setPersistence(auth, browserLocalPersistence).catch((error) => {
+      console.error("Auth persistence setup failed:", error);
+    });
+    getRedirectResult(auth).catch((error) => {
+      const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : "";
+      const mapped = code ? buildAuthErrorMessage(code) : "Redirect sign-in failed. Please use the Sign In button.";
+      if (mapped) {
+        setAuthError(mapped);
+      }
+      console.error("Redirect sign-in failed:", error);
+    });
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -235,6 +325,7 @@ export default function App() {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
+        setAuthError(null);
         try {
           const userRef = doc(db, 'users', u.uid);
           const userSnap = await getDoc(userRef);
@@ -246,8 +337,7 @@ export default function App() {
               email: u.email || '',
               displayName: u.displayName || 'Punter',
               balance: 0,
-              planTier: u.email === 'kofi.farkye@gmail.com' ? 'sharp' : 'free',
-              isAdmin: u.email === 'kofi.farkye@gmail.com',
+              planTier: 'free',
               queryCount: 0,
               lastQueryDate: today,
               preferences: { favoriteLeagues: [], riskLevel: 'medium' }
@@ -256,13 +346,6 @@ export default function App() {
             setUserData(newUserData);
           } else {
             const data = userSnap.data() as UserData;
-            
-            // Auto-elevate kofi.farkye@gmail.com
-            if (u.email === 'kofi.farkye@gmail.com' && (!data.isAdmin || data.planTier !== 'sharp')) {
-              data.isAdmin = true;
-              data.planTier = 'sharp';
-              await updateDoc(userRef, { isAdmin: true, planTier: 'sharp' });
-            }
 
             setUserData(data);
 
@@ -323,6 +406,22 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
+  useEffect(() => {
+    const closeMenuOnOutsidePointer = (event: MouseEvent | TouchEvent) => {
+      if (!userMenuRef.current) return;
+      if (!userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', closeMenuOnOutsidePointer);
+    document.addEventListener('touchstart', closeMenuOnOutsidePointer);
+    return () => {
+      document.removeEventListener('mousedown', closeMenuOnOutsidePointer);
+      document.removeEventListener('touchstart', closeMenuOnOutsidePointer);
+    };
+  }, []);
+
   const refreshOdds = async () => {
     setIsLoadingOdds(true);
     // Left for manual refresh if needed, but SSE handles auto updates
@@ -331,10 +430,43 @@ export default function App() {
     setIsLoadingOdds(false);
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    setAuthError(null);
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    signInWithRedirect(auth, provider);
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithPopup(auth, provider);
+      return;
+    } catch (error: any) {
+      const code = typeof error?.code === 'string' ? error.code : '';
+      const mappedMessage = code ? buildAuthErrorMessage(code) : "Sign-in failed. Please try again.";
+      const shouldFallbackToRedirect = [
+        'auth/popup-blocked',
+        'auth/popup-closed-by-user',
+        'auth/cancelled-popup-request',
+        'auth/web-storage-unsupported',
+        'auth/operation-not-supported-in-this-environment',
+      ].includes(code);
+
+      if (shouldFallbackToRedirect) {
+        const redirectMessage = code ? buildAuthErrorMessage(code) : "Switching to redirect sign-in.";
+        setAuthError(redirectMessage);
+        signInWithRedirect(auth, provider).catch((redirectError) => {
+          const redirectCode = typeof (redirectError as { code?: unknown }).code === 'string'
+            ? (redirectError as { code: string }).code
+            : "";
+          const mappedRedirectMessage = redirectCode ? buildAuthErrorMessage(redirectCode) : "Redirect sign-in failed. Please retry.";
+          setAuthError(mappedRedirectMessage);
+          console.error("Sign-in redirect failed:", redirectError);
+        });
+        return;
+      }
+      if (code) {
+        setAuthError(mappedMessage);
+      }
+      console.error("Sign-in failed:", error);
+    }
   };
 
   const handleLogout = () => signOut(auth);
@@ -343,7 +475,11 @@ export default function App() {
 
   const sendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim() || !user) return;
+    if (!inputText.trim()) return;
+    if (!user) {
+      await handleLogin();
+      return;
+    }
 
     // Use default tier if userData didn't load properly yet
     const planTier = userData?.planTier || 'free';
@@ -407,13 +543,13 @@ export default function App() {
   };
 
   if (isLoadingArtifact) {
-    return <div className="h-screen w-screen flex items-center justify-center bg-paper text-zinc-500 font-mono text-sm uppercase tracking-widest animate-pulse">Loading Artifact...</div>;
+    return <div className="min-h-[100dvh] w-full flex items-center justify-center bg-paper text-zinc-500 font-mono text-sm uppercase tracking-widest animate-pulse">Loading Artifact...</div>;
   }
 
   if (sharedArtifact) {
     return (
-      <div className="h-screen w-screen bg-zinc-100 flex flex-col items-center overflow-auto py-12">
-        <div className="w-full max-w-[850px] flex items-center justify-between mb-4 px-6 xl:px-0">
+      <div className="min-h-[100dvh] w-full bg-zinc-100 flex flex-col items-center overflow-auto px-4 py-8 safe-area-bottom">
+        <div className="w-full max-w-[850px] flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 flex items-center justify-center font-serif italic text-xl font-medium text-brand select-none leading-none">B</div>
             <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Document Artifact</span>
@@ -425,11 +561,12 @@ export default function App() {
             Create Your Own
           </button>
         </div>
-        <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[800px]">
+        <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[70dvh]">
           <iframe 
             srcDoc={sharedArtifact} 
-            className="w-full h-full min-h-[800px] border-none"
-            sandbox="allow-scripts allow-same-origin"
+            className="w-full h-full min-h-[70dvh] border-none"
+            sandbox=""
+            referrerPolicy="no-referrer"
           />
         </div>
       </div>
@@ -444,22 +581,22 @@ export default function App() {
   }, [user, activeTab]);
 
   return (
-    <div className="flex h-[100dvh] bg-paper text-ink font-sans overflow-hidden relative">
+    <div className="flex min-h-[100dvh] bg-paper text-ink font-sans overflow-hidden relative">
       {/* Subtle Ambient Bleed */}
       <div className="ambient-blob ambient-blob-1"></div>
       <div className="ambient-blob ambient-blob-2"></div>
       <div className="ambient-blob ambient-blob-3"></div>
       <div className="absolute inset-0 bg-paper/60 backdrop-blur-[100px] z-0 pointer-events-none" />
 
-      <div className="flex h-full w-full z-10 relative">
+      <div className="flex h-full w-full z-10 relative flex-col md:flex-row">
         <AnimatePresence>
           {showUpgradeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-paper/80 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-paper/80 backdrop-blur-sm overflow-y-auto">
              <motion.div
                initial={{ opacity: 0, scale: 0.95 }}
                animate={{ opacity: 1, scale: 1 }}
                exit={{ opacity: 0, scale: 0.95 }}
-               className="max-w-md w-full bg-white border border-zinc-100 rounded-2xl shadow-xl overflow-hidden p-8 flex flex-col items-center text-center relative"
+               className="max-w-md w-full max-h-[calc(100dvh-2rem)] bg-white border border-zinc-100 rounded-2xl shadow-xl overflow-y-auto p-8 flex flex-col items-center text-center relative"
              >
                <button onClick={() => setShowUpgradeModal(false)} className="absolute top-6 right-6 text-zinc-400 hover:text-ink">
                  <AlertCircle size={16} />
@@ -482,12 +619,12 @@ export default function App() {
         )}
       </AnimatePresence>
       {/* Primary Global Navigation */}
-      <aside className="w-16 flex flex-col items-center py-8 border-r border-zinc-200 bg-paper shrink-0 z-30">
-        <div className="mb-10">
-          <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none">B</div>
+      <aside className="w-full md:w-16 flex md:flex-col items-center md:items-center justify-between md:justify-start px-3 md:px-0 py-3 md:py-8 border-b md:border-b-0 md:border-r border-zinc-200 bg-paper shrink-0 z-30 safe-area-top safe-area-x">
+        <div className="md:mb-10 shrink-0">
+          <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center font-serif italic text-2xl md:text-3xl font-medium text-brand select-none leading-none">B</div>
         </div>
         
-        <nav className="flex flex-col gap-6 flex-1">
+        <nav className="flex md:flex-col gap-2 md:gap-6 flex-1 md:flex-none justify-center overflow-x-auto no-scrollbar px-2 md:px-0">
             <SideNavIcon 
               active={activeTab === 'chat'} 
               onClick={() => setActiveTab('chat')}
@@ -515,11 +652,11 @@ export default function App() {
               />
         </nav>
 
-        <div className="mt-auto flex flex-col gap-6 items-center">
-          <button onClick={() => setShowAboutModal(true)} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-zinc-400 hover:text-zinc-800 hover:bg-zinc-50/80 transition-all duration-300">
+        <div className="md:mt-auto flex md:flex-col gap-2 md:gap-6 items-center shrink-0">
+          <button onClick={() => setShowAboutModal(true)} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50/80 transition-all duration-300">
             <Info size={20} strokeWidth={1.5} />
           </button>
-          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-brand hover:bg-brand/10 transition-all duration-300 mb-2">
+          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-brand hover:bg-brand/10 transition-all duration-300 md:mb-2">
             <Zap size={20} strokeWidth={1.5} />
           </button>
         </div>
@@ -528,16 +665,16 @@ export default function App() {
       {/* About Modal */}
       <AnimatePresence>
         {showAboutModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-paper/80 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-paper/80 backdrop-blur-sm overflow-y-auto">
              <motion.div 
                initial={{ opacity: 0, scale: 0.95 }}
                animate={{ opacity: 1, scale: 1 }}
                exit={{ opacity: 0, scale: 0.95 }}
-               className="bg-white border border-zinc-200 shadow-xl rounded-2xl p-8 max-w-md w-full relative"
+               className="bg-white border border-zinc-200 shadow-xl rounded-2xl p-8 max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto relative"
              >
                <button 
                  onClick={() => setShowAboutModal(false)}
-                 className="absolute top-6 right-6 text-zinc-400 hover:text-ink"
+                 className="absolute top-6 right-6 text-zinc-500 hover:text-ink"
                >
                  <X size={20} strokeWidth={1.5} />
                </button>
@@ -558,11 +695,15 @@ export default function App() {
                    </ul>
                  </div>
                  <p>
-                   Use the chat or tap a game card to explore deep-dive analytics for any matchup. Data refreshed live via ESPN and The Odds API.
+                   Use the chat or tap a game card to explore deep-dive analytics for any matchup. ESPN checks all game-level context in-session.
                  </p>
-                 <p className="pt-4 border-t border-zinc-100">
+                 <div className="pt-4 border-t border-zinc-100 space-y-2">
                    Feedback? <a href="mailto:hello@baseline.com" className="text-brand hover:underline">hello@baseline.com</a>
-                 </p>
+                   <p><a href={APP_SHELL_LINKS.privacyPolicyUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">Privacy Policy</a></p>
+                   <p><a href={APP_SHELL_LINKS.termsOfServiceUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">Terms of Service</a></p>
+                   <p><a href={APP_SHELL_LINKS.appSupportUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">App Support</a></p>
+                   <p className="text-xs text-zinc-500">{IOS_WRAPPER_NOTE}</p>
+                 </div>
                </div>
              </motion.div>
           </div>
@@ -570,34 +711,48 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-paper">
+      <main className="flex-1 flex flex-col min-w-0 bg-paper safe-area-bottom">
         {/* Unified Header */}
-        <header className="h-16 flex items-center justify-between px-6 xl:px-12 border-b border-zinc-100/80 bg-paper/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20">
+        <header className="h-16 flex items-center justify-between px-4 sm:px-6 xl:px-10 border-b border-zinc-100/80 bg-paper/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20 safe-area-top">
           <div className="flex items-center gap-6">
             {location.pathname !== '/' && (
-              <h1 className="text-[10px] font-bold tracking-[0.5em] text-zinc-400 uppercase">
+              <h1 className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">
                 {location.pathname === '/pricing' ? 'Upgrade' : 'Daily Board'}
               </h1>
             )}
           </div>
           
-          <div className="flex items-center gap-6">
-            <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-medium hidden sm:inline-block">
+          <div className="flex items-center gap-3 sm:gap-6">
+            {authError ? (
+              <p className="text-[11px] text-amber-700 max-w-[320px] text-right leading-snug">
+                {authError}
+              </p>
+            ) : null}
+            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-medium hidden sm:inline-block">
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: '2-digit' }).toUpperCase()}
             </span>
             {user ? (
-              <div className="flex items-center gap-4 relative group">
-                <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center overflow-hidden cursor-pointer">
-                  {user.photoURL ? <img src={user.photoURL} alt="" /> : <UserIcon size={12} className="text-zinc-400" />}
-                </div>
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-zinc-100 shadow-xl rounded-lg py-2 hidden group-hover:block transition-all z-50">
+              <div className="flex items-center gap-4 relative" ref={userMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsUserMenuOpen((prev) => !prev)}
+                  className="w-9 h-9 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center overflow-hidden cursor-pointer focus-visible:outline-none"
+                  aria-label="Open account menu"
+                  aria-expanded={isUserMenuOpen}
+                >
+                  {user.photoURL ? <img src={user.photoURL} alt="" /> : <UserIcon size={12} className="text-zinc-500" />}
+                </button>
+                <div className={cn(
+                  "absolute right-0 top-full mt-2 w-52 bg-white border border-zinc-100 shadow-xl rounded-lg py-2 z-50",
+                  isUserMenuOpen ? "block" : "hidden"
+                )}>
                    <div className="px-4 py-2 border-b border-zinc-50 mb-2">
                      <p className="text-xs font-bold text-ink truncate">{user.email}</p>
                    </div>
-                   <button onClick={() => navigate('/pricing')} className="w-full text-left px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
+                   <button onClick={() => { setIsUserMenuOpen(false); navigate('/pricing'); }} className="w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
                      <Zap size={14} className="text-brand" /> Manage Subscription
                    </button>
-                   <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
+                   <button onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} className="w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
                      <LogOut size={14} /> Sign out
                    </button>
                 </div>
@@ -610,7 +765,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto xl:overflow-hidden relative">
+        <div className="flex-1 flex flex-col xl:flex-row overflow-hidden relative">
           <div className="flex-1 flex flex-col min-w-0 xl:border-r border-zinc-100 relative">
              <Routes>
                <Route path="/" element={
@@ -621,26 +776,26 @@ export default function App() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full flex flex-col max-w-4xl mx-auto w-full"
+                  className="h-full flex flex-col max-w-5xl mx-auto w-full"
                 >
-                  <div className="flex-1 px-12 py-8 overflow-y-auto space-y-12 custom-scrollbar">
+                  <div className="flex-1 px-4 sm:px-6 lg:px-10 xl:px-12 py-6 md:py-8 overflow-y-auto space-y-10 custom-scrollbar pb-44 md:pb-48">
                     {messages.length === 0 && (
-                      <div className="pb-12 pt-8">
+                      <div className="pb-8 pt-4">
                         <div className="mb-8">
                           <h3 className="text-2xl serif-italic font-medium text-ink tracking-tight">
                             Today's Slate
                           </h3>
                           {isLoadingOdds ? (
-                            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-400 mt-2 flex items-center gap-2">
+                            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mt-2 flex items-center gap-2">
                               <RefreshCw className="animate-spin" size={10} /> Hydrating...
                             </p>
                           ) : (
-                            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-400 mt-2">
+                            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mt-2">
                               {todayGames.length} games · {liveGames.length} live
                             </p>
                           )}
                         </div>
-                        <div className="flex flex-col gap-6">
+                        <div className="flex flex-col gap-4 md:gap-5">
                            {featuredGames.map(odd => (
                              <button 
                                key={odd.id} 
@@ -650,7 +805,7 @@ export default function App() {
                                    (document.querySelector('input[type="text"]') as HTMLInputElement)?.focus();
                                  }, 100);
                                }}
-                               className="block w-full bg-white border border-zinc-200 p-8 rounded-xl text-left hover:border-zinc-300 hover:shadow-sm transition-all group flex flex-col gap-6 relative overflow-hidden"
+                               className="block w-full bg-white border border-zinc-200 p-4 sm:p-6 rounded-xl text-left hover:border-zinc-300 hover:shadow-sm transition-all group flex flex-col gap-4 relative overflow-hidden"
                              >
                                 {odd.status === 'live' && (
                                   <div className="absolute top-0 left-0 w-full h-1 bg-brand" />
@@ -659,7 +814,7 @@ export default function App() {
                                   <div>
                                     <div className="flex items-center gap-2 mb-1">
                                       {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
-                                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{odd.sport_title} {odd.status === 'live' ? '• LIVE' : ''}</span>
+                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{odd.sport_title} {odd.status === 'live' ? '• LIVE' : ''}</span>
                                     </div>
                                     <span className="text-xs font-mono text-zinc-500">{odd.venue || 'TBA'} • {new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                   </div>
@@ -677,53 +832,59 @@ export default function App() {
                                   </div>
                                 </div>
                                 
-                                <div className="space-y-4">
-                                  <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-4">
-                                      <img src={getEspnLogo(odd.away_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
-                                      <div>
-                                        <div className="font-medium text-lg text-ink serif">{odd.away_team}</div>
-                                        <div className="text-[10px] font-mono text-zinc-400">32-14</div>
-                                      </div>
-                                    </div>
-                                    <div className="text-right flex items-center gap-4">
-                                      {odd.bookmakers?.[0]?.markets?.map(m => {
-                                        const outcome = m.outcomes.find(o => o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name) || o.name === 'Over');
-                                        if (!outcome) return null;
-                                        return (
-                                          <div key={m.key} className="flex flex-col items-end">
-                                            <span className="text-[9px] uppercase tracking-widest text-zinc-400 mb-0.5">{m.key === 'h2h' ? 'ML' : m.key === 'spreads' ? 'Spread' : 'Total'}</span>
-                                            <span className="font-mono text-sm text-ink font-medium">
-                                              {m.key === 'totals' ? `O ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
-                                            </span>
+                                <div className="space-y-3">
+                                  {odd.bookmakers?.length ? (
+                                    <>
+                                      <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-4">
+                                          <img src={getEspnLogo(odd.away_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
+                                          <div>
+                                            <div className="font-medium text-lg text-ink serif">{odd.away_team}</div>
                                           </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                  
-                                  <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-4">
-                                      <img src={getEspnLogo(odd.home_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
-                                      <div>
-                                        <div className="font-medium text-lg text-ink serif">{odd.home_team}</div>
-                                        <div className="text-[10px] font-mono text-zinc-400">28-18</div>
+                                        </div>
+                                        <div className="text-right flex items-center gap-4">
+                                          {odd.bookmakers?.[0]?.markets?.map(m => {
+                                            const outcome = m.outcomes.find(o => o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name) || o.name === 'Over');
+                                            if (!outcome) return null;
+                                            return (
+                                              <div key={m.key} className="flex flex-col items-end">
+                                                <span className="text-[9px] uppercase tracking-widest text-zinc-500 mb-0.5">{m.key === 'h2h' ? 'ML' : m.key === 'spreads' ? 'Spread' : 'Total'}</span>
+                                                <span className="font-mono text-sm text-ink font-medium">
+                                                  {m.key === 'totals' ? `O ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
+                                                </span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
                                       </div>
-                                    </div>
-                                    <div className="text-right flex items-center gap-4">
-                                      {odd.bookmakers?.[0]?.markets?.map(m => {
-                                        const outcome = m.outcomes.find(o => o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name) || o.name === 'Under');
-                                        if (!outcome) return null;
-                                        return (
-                                          <div key={m.key} className="flex flex-col items-end">
-                                            <span className="font-mono text-sm text-ink font-medium relative top-[14px]">
-                                              {m.key === 'totals' ? `U ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
-                                            </span>
+                                      
+                                      <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-4">
+                                          <img src={getEspnLogo(odd.home_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
+                                          <div>
+                                            <div className="font-medium text-lg text-ink serif">{odd.home_team}</div>
                                           </div>
-                                        );
-                                      })}
+                                        </div>
+                                        <div className="text-right flex items-center gap-4">
+                                          {odd.bookmakers?.[0]?.markets?.map(m => {
+                                            const outcome = m.outcomes.find(o => o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name) || o.name === 'Under');
+                                            if (!outcome) return null;
+                                            return (
+                                              <div key={m.key} className="flex flex-col items-end">
+                                                <span className="font-mono text-sm text-ink font-medium relative top-[14px]">
+                                                  {m.key === 'totals' ? `U ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
+                                                </span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-4 py-3 text-[11px] uppercase tracking-widest text-zinc-500">
+                                      {describeOddsLine(odd) || "ESPN checked. Market odds not found yet."}
                                     </div>
-                                  </div>
+                                  )}
                                 </div>
                                 
                                 {/* Featured Pitcher Matchup */}
@@ -733,7 +894,7 @@ export default function App() {
                                       <div className="w-1.5 h-1.5 rotate-45 bg-[#2D4A3E] shrink-0 opacity-80" />
                                       <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Pitching Matchup</span>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                                       <PitcherDisplay 
                                         teamFull={odd.away_team} 
                                         name={odd.away_pitcher} 
@@ -763,15 +924,15 @@ export default function App() {
                     {isTyping && (
                       <div className="flex gap-4 items-center">
                          <div className="w-1 h-1 bg-brand rounded-full animate-pulse" />
-                         <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-400">Calculating...</span>
+                         <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Calculating...</span>
                       </div>
                     )}
                      <div ref={chatEndRef} />
                    </div>
                    
                    {/* Minimal Input Area */}
-                   <div className="p-6 md:p-8 sticky bottom-0 bg-paper border-t border-zinc-100/50 flex flex-col z-20">
-                     <div className="flex gap-2 mb-3">
+                   <div className="px-4 sm:px-6 lg:px-10 xl:px-12 pt-4 pb-4 sticky bottom-0 bg-paper/95 backdrop-blur-md border-t border-zinc-100/70 flex flex-col z-20 safe-area-bottom">
+                     <div className="flex gap-2 mb-3 flex-wrap">
                        {(['live', 'stats', 'trends'] as const).map(mode => {
                          const isActive = groundingMode === mode;
                          return (
@@ -802,7 +963,7 @@ export default function App() {
                              key={idx}
                              type="button" 
                              onClick={() => setInputText(sug)} 
-                             className="text-[11px] bg-white border border-zinc-200 text-zinc-500 px-4 py-2 rounded-full hover:bg-zinc-50 hover:text-ink transition-colors"
+                             className="text-[11px] bg-white border border-zinc-200 text-zinc-600 px-4 py-2 rounded-full hover:bg-zinc-50 hover:text-ink transition-colors"
                            >
                              {sug}
                            </button>
@@ -816,7 +977,7 @@ export default function App() {
                          value={inputText}
                          onChange={(e) => setInputText(e.target.value)}
                          placeholder="What's happening tonight?"
-                         className="w-full bg-white border border-zinc-200 rounded-lg px-6 py-4 focus:outline-none focus:border-zinc-400 transition-all text-sm text-ink placeholder:text-zinc-400 placeholder:italic placeholder:font-serif"
+                         className="w-full bg-white border border-zinc-200 rounded-lg px-5 py-4 focus:outline-none focus:border-zinc-500 transition-all text-sm text-ink placeholder:text-zinc-500 placeholder:italic placeholder:font-serif"
                        />
                        <button 
                          type="submit"
@@ -836,12 +997,12 @@ export default function App() {
                    initial={{ opacity: 0 }}
                    animate={{ opacity: 1 }}
                    exit={{ opacity: 0 }}
-                   className="h-full p-12 overflow-y-auto custom-scrollbar"
+                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto custom-scrollbar"
                  >
-                   <div className="max-w-6xl mx-auto space-y-16">
-                     <div className="flex items-end justify-between border-b border-zinc-100 pb-10">
+                   <div className="max-w-5xl mx-auto space-y-10">
+                     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-zinc-100 pb-7">
                        <div>
-                         <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-6">The Daily Board</h2>
+                         <h2 className="text-3xl sm:text-4xl serif-italic font-medium text-ink tracking-tight mb-4">The Daily Board</h2>
                          <div className="flex items-center gap-2 bg-zinc-50/50 p-1 rounded-lg border border-zinc-100 inline-flex">
                            {['previous', 'today', 'tomorrow'].map(filter => (
                              <button
@@ -851,7 +1012,7 @@ export default function App() {
                                  "text-[11px] uppercase tracking-widest font-bold px-6 py-2 rounded-md transition-all",
                                  slateFilter === filter 
                                    ? "bg-white text-brand shadow-sm ring-1 ring-zinc-200/50" 
-                                   : "text-zinc-400 hover:text-ink hover:bg-zinc-100/50"
+                                   : "text-zinc-500 hover:text-ink hover:bg-zinc-100/50"
                                )}
                              >
                                {filter}
@@ -861,14 +1022,14 @@ export default function App() {
                        </div>
                        <button 
                          onClick={refreshOdds}
-                         className="flex items-center gap-2 group text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-ink transition-colors"
+                         className="flex items-center gap-2 group text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-ink transition-colors"
                        >
                          <RefreshCw size={12} className={isTyping ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"} strokeWidth={2} />
                          Refresh Feed
                        </button>
                      </div>
 
-                     <div className="grid md:grid-cols-2 gap-12 mt-4">
+                     <div className="grid md:grid-cols-2 gap-5 md:gap-6 mt-2">
                        {fullSlate.map((odd) => (
                          <OddsCard 
                            key={odd.id} 
@@ -883,14 +1044,14 @@ export default function App() {
                          />
                        ))}
                        {isLoadingOdds ? (
-                          <div className="col-span-full py-20 flex flex-col items-center justify-center border border-dashed border-zinc-200 rounded-xl space-y-4">
+                          <div className="col-span-full py-16 flex flex-col items-center justify-center border border-dashed border-zinc-200 rounded-xl space-y-4">
                              <RefreshCw className="animate-spin text-zinc-300" size={24} />
-                             <p className="text-zinc-400 italic serif">Hydrating market data...</p>
+                             <p className="text-zinc-500 italic serif">Hydrating market data...</p>
                           </div>
                        ) : fullSlate.length === 0 ? (
-                          <div className="col-span-full py-24 flex flex-col items-center justify-center text-center border border-dashed border-zinc-200 rounded-xl">
+                          <div className="col-span-full py-20 flex flex-col items-center justify-center text-center border border-dashed border-zinc-200 rounded-xl">
                              <p className="text-zinc-600 font-medium mb-1">No games today.</p>
-                             <p className="text-zinc-400 text-sm">Check back tomorrow.</p>
+                             <p className="text-zinc-500 text-sm">Check back tomorrow.</p>
                           </div>
                        ) : null}
                      </div>
@@ -904,7 +1065,7 @@ export default function App() {
                    initial={{ opacity: 0 }}
                    animate={{ opacity: 1 }}
                    exit={{ opacity: 0 }}
-                   className="p-8 xl:p-12 h-full flex flex-col"
+                   className="p-4 sm:p-6 xl:p-10 h-full flex flex-col overflow-y-auto custom-scrollbar"
                  >
                    <div className="max-w-3xl">
                      <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-2">My Action Ledger</h2>
@@ -925,7 +1086,7 @@ export default function App() {
                      </div>
 
                      <div className="space-y-4">
-                       <h3 className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-400 mb-4 border-b border-zinc-100 pb-2">Recent Logged Bets</h3>
+                       <h3 className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-500 mb-4 border-b border-zinc-100 pb-2">Recent Logged Bets</h3>
                        
                        <div className="flex items-center justify-between p-4 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors">
                          <div className="flex flex-col gap-1">
@@ -933,7 +1094,7 @@ export default function App() {
                            <span className="text-[10px] font-mono text-zinc-500">vs Athletics • May 5, 2026</span>
                          </div>
                          <div className="flex flex-col items-end gap-1">
-                           <span className="text-sm font-mono text-zinc-400">-135</span>
+                           <span className="text-sm font-mono text-zinc-500">-135</span>
                            <span className="text-[10px] font-bold uppercase text-brand">Win</span>
                          </div>
                        </div>
@@ -944,12 +1105,12 @@ export default function App() {
                            <span className="text-[10px] font-mono text-zinc-500">MIA @ BAL • May 4, 2026</span>
                          </div>
                          <div className="flex flex-col items-end gap-1">
-                           <span className="text-sm font-mono text-zinc-400">-110</span>
+                           <span className="text-sm font-mono text-zinc-500">-110</span>
                            <span className="text-[10px] font-bold uppercase text-[#D23D33]">Loss</span>
                          </div>
                        </div>
                        
-                       <button className="w-full mt-4 py-4 border border-zinc-200 border-dashed rounded-lg text-zinc-400 hover:text-ink hover:border-zinc-300 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+                       <button className="w-full mt-4 py-4 border border-zinc-200 border-dashed rounded-lg text-zinc-500 hover:text-ink hover:border-zinc-300 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
                          <PlusCircle size={14} /> Log Manual Bet
                        </button>
                      </div>
@@ -963,25 +1124,25 @@ export default function App() {
                    initial={{ opacity: 0 }}
                    animate={{ opacity: 1 }}
                    exit={{ opacity: 0 }}
-                   className="h-full p-12 overflow-y-auto"
+                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto"
                  >
                    <div className="max-w-4xl mx-auto">
                       <div className="border-b border-zinc-100 pb-10 mb-12">
                         <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">Schedule</h2>
-                        <p className="text-zinc-400 text-[10px] uppercase tracking-[0.4em] font-bold mt-4">Upcoming Rotations</p>
+                        <p className="text-zinc-500 text-[10px] uppercase tracking-[0.35em] font-bold mt-4">Upcoming Rotations</p>
                       </div>
                       
                       <div className="space-y-6">
                          {[1,2,3,4,5].map(i => (
-                           <div key={i} className="flex items-center gap-8 py-6 border-b border-zinc-100 group">
-                              <span className="font-mono text-zinc-300 group-hover:text-ink transition-colors">0{i}</span>
+                           <div key={i} className="flex items-center gap-4 sm:gap-8 py-6 border-b border-zinc-100 group">
+                              <span className="font-mono text-zinc-500 group-hover:text-ink transition-colors">0{i}</span>
                               <div className="flex-1">
-                                 <h4 className="text-lg font-medium text-zinc-400 group-hover:text-ink transition-colors">San Francisco AT Los Angeles</h4>
-                                 <p className="text-[10px] uppercase tracking-widest text-zinc-300 font-bold mt-1">7:10 PM ET • Dodger Stadium</p>
+                                 <h4 className="text-lg font-medium text-zinc-600 group-hover:text-ink transition-colors">San Francisco AT Los Angeles</h4>
+                                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mt-1">7:10 PM ET • Dodger Stadium</p>
                               </div>
                               <div className="text-right">
-                                 <span className="block font-mono text-zinc-400 group-hover:text-brand transition-colors">-145 / +125</span>
-                                 <span className="text-[9px] uppercase font-bold text-zinc-300">Total 8.5</span>
+                                 <span className="block font-mono text-zinc-600 group-hover:text-brand transition-colors">-145 / +125</span>
+                                 <span className="text-[9px] uppercase font-bold text-zinc-500">Total 8.5</span>
                               </div>
                            </div>
                          ))}
@@ -996,12 +1157,12 @@ export default function App() {
                    initial={{ opacity: 0 }}
                    animate={{ opacity: 1 }}
                    exit={{ opacity: 0 }}
-                   className="h-full p-12 overflow-y-auto"
+                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto"
                  >
                    <div className="max-w-4xl mx-auto">
                      <div className="border-b border-zinc-100 pb-10 mb-12">
                        <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">Generated Artifacts</h2>
-                       <p className="text-zinc-400 text-[10px] uppercase tracking-[0.4em] font-bold mt-4">Registry of interfaces & reports</p>
+                       <p className="text-zinc-500 text-[10px] uppercase tracking-[0.35em] font-bold mt-4">Registry of interfaces & reports</p>
                      </div>
                      
                      {artifactsList.length === 0 ? (
@@ -1013,7 +1174,7 @@ export default function App() {
                      ) : (
                        <div className="grid gap-6">
                          {artifactsList.map((artifact) => (
-                           <div key={artifact.id} className="bg-white border border-zinc-200 rounded-xl p-8 hover:shadow-md transition-all group flex justify-between items-center cursor-pointer relative overflow-hidden" onClick={() => window.open(`?artifact=${artifact.id}`, '_blank')}>
+                           <div key={artifact.id} className="bg-white border border-zinc-200 rounded-xl p-8 hover:shadow-md transition-all group flex justify-between items-center cursor-pointer relative overflow-hidden" onClick={() => window.open(`?artifact=${artifact.id}`, '_blank', 'noopener,noreferrer')}>
                              <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
                                <FileText size={120} />
                              </div>
@@ -1022,15 +1183,15 @@ export default function App() {
                                  <h3 className="font-serif text-2xl text-ink group-hover:text-brand transition-colors">{artifact.title || 'Untitled Interface'}</h3>
                                  <span className="bg-zinc-100 text-zinc-600 px-3 py-1 rounded-full text-[9px] uppercase font-bold tracking-widest">{artifact.type}</span>
                                </div>
-                               <div className="flex items-center gap-6 text-xs font-mono text-zinc-400">
-                                 <span className="flex items-center gap-2"><Globe size={14} className="text-zinc-300" /> {artifact.source || 'Generated Server-Side'}</span>
+                               <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-zinc-500">
+                                 <span className="flex items-center gap-2"><Globe size={14} className="text-zinc-500" /> {artifact.source || 'Generated Server-Side'}</span>
                                  {artifact.createdAt && (
                                    <span><span className="text-zinc-500 uppercase tracking-wider text-[10px] font-bold mr-2">Deployed</span> {new Date(artifact.createdAt.toMillis()).toLocaleString()}</span>
                                  )}
                                </div>
                              </div>
                              <div className="relative z-10 w-12 h-12 flex items-center justify-center rounded-full bg-zinc-50 group-hover:bg-brand group-hover:text-white transition-colors">
-                               <ChevronRight size={20} className="text-zinc-400 group-hover:text-white transition-colors" />
+                               <ChevronRight size={20} className="text-zinc-500 group-hover:text-white transition-colors" />
                              </div>
                            </div>
                          ))}
@@ -1047,14 +1208,14 @@ export default function App() {
           </div>
 
           {/* Sidebar / Bottom Rail */}
-          <aside className="w-full xl:w-72 bg-white flex flex-col shrink-0 border-t xl:border-t-0 xl:border-l border-zinc-100 xl:overflow-y-auto custom-scrollbar">
+          <aside className="w-full xl:w-80 bg-white flex flex-col shrink-0 border-t xl:border-t-0 xl:border-l border-zinc-100 xl:overflow-y-auto custom-scrollbar safe-area-bottom">
             {/* Mobile Toggle */}
             <button 
-              className="xl:hidden w-full h-16 flex items-center justify-between px-6 border-b border-zinc-100 bg-white sticky top-0 z-10"
+              className="xl:hidden w-full h-16 flex items-center justify-between px-4 sm:px-6 border-b border-zinc-100 bg-white sticky top-0 z-10"
               onClick={() => setIsSlateExpanded(!isSlateExpanded)}
             >
-              <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">View Action & Results</span>
-              <ChevronRight className={cn("text-zinc-400 transition-transform", isSlateExpanded && "rotate-90")} size={16} />
+              <span className="text-[10px] font-bold tracking-[0.35em] text-zinc-500 uppercase">View Action & Results</span>
+              <ChevronRight className={cn("text-zinc-500 transition-transform", isSlateExpanded && "rotate-90")} size={16} />
             </button>
 
             <div className={cn("xl:block", !isSlateExpanded && "hidden")}>
@@ -1085,10 +1246,10 @@ export default function App() {
                   {isLoadingOdds ? (
                     <div className="p-10 text-center">
                       <RefreshCw className="animate-spin text-zinc-300 mx-auto mb-4" size={20} />
-                      <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-bold">Hydrating...</p>
+                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Hydrating...</p>
                     </div>
                   ) : fullSlate.length === 0 ? (
-                    <div className="p-10 text-center flex flex-col gap-1 text-[10px] text-zinc-400 uppercase tracking-widest font-bold">
+                    <div className="p-10 text-center flex flex-col gap-1 text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
                       <span>No games today</span>
                       <span>Check back tomorrow</span>
                     </div>
@@ -1104,7 +1265,7 @@ export default function App() {
                         key={idx} 
                         to={`/game/${odd.id}`}
                         className={cn(
-                          "block w-full flex flex-col px-6 xl:px-10 py-4 border-b border-zinc-50/50 transition-colors group text-left",
+                          "block w-full flex flex-col px-6 xl:px-10 py-5 border-b border-zinc-50/50 transition-colors group text-left",
                           odd.status === 'live' ? "bg-brand/5 hover:bg-brand/10" : "hover:bg-zinc-50"
                         )}
                       >
@@ -1112,15 +1273,17 @@ export default function App() {
                           <div>
                             <div className="flex items-center gap-2 mb-1">
                               {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-brand live-pulse" />}
-                              <span className="text-[10px] font-mono text-zinc-500 group-hover:text-zinc-800 transition-colors">
-                              {odd.status === 'live' ? (
+                              <span className="text-[10px] font-mono text-zinc-600 group-hover:text-zinc-900 transition-colors">
+                                {odd.status === 'live' ? (
                                   <>LIVE{odd.situation ? ` • ${odd.situation}` : ''}</>
                                 ) : odd.status === 'final' ? (
                                   <>FINAL</>
                                 ) : (
                                   new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
                                 )}
-                                {bookmaker?.title && <span className="ml-2 uppercase tracking-wide text-[9px] text-zinc-500">({bookmaker.title})</span>}
+                                {odd.market_data_status?.state === 'partial' && (
+                                  <span className="ml-2 uppercase tracking-wide text-[9px] text-zinc-500">ESPN checked</span>
+                                )}
                               </span>
                             </div>
                             <div className="text-sm serif text-zinc-800 mt-1">
@@ -1147,6 +1310,9 @@ export default function App() {
                                 <span className="font-mono text-sm text-zinc-800">{totalPoint}</span>
                               </div>
                             )}
+                            {!moneylineStr && !totalPoint && odd.market_data_status?.state === "partial" && (
+                              <span className="text-[10px] uppercase tracking-widest text-zinc-500">ESPN checked • market odds not found yet</span>
+                            )}
                           </div>
                         </div>
 
@@ -1157,7 +1323,7 @@ export default function App() {
                               <div className="w-1.5 h-1.5 rotate-45 bg-zinc-300 group-hover:bg-brand transition-colors shrink-0" />
                               <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500 group-hover:text-brand transition-colors">Pitching Matchup</span>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <PitcherDisplay 
                                 teamFull={odd.away_team} 
                                 name={odd.away_pitcher} 
@@ -1186,13 +1352,13 @@ export default function App() {
               {finalGames.length > 0 && (
                 <div>
                   <div className="h-16 flex items-center px-6 xl:px-10 border-b border-zinc-100 bg-white sticky top-0 z-10">
-                    <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">Recent Finals</span>
+                    <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Recent Finals</span>
                   </div>
                   <div className="p-6 xl:p-10 space-y-10">
                     {finalGames.map((odd, idx) => (
                       <div key={idx} className="space-y-4">
                         <div className="flex justify-between items-center">
-                          <span className="text-[9px] text-zinc-300 font-bold uppercase tracking-tight truncate w-32">{odd.sport_title}</span>
+                          <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-tight truncate w-32">{odd.sport_title}</span>
                           <span className="text-[9px] font-mono text-brand italic">FINAL</span>
                         </div>
                         <div className="space-y-2">
@@ -1223,7 +1389,7 @@ export default function App() {
               )}
               
               <div className="p-10 text-center mt-auto border-t border-zinc-100/50">
-                <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-300">Data via ESPN & The Odds API</span>
+                <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">ESPN checked board state</span>
               </div>
             </div>
           </aside>
@@ -1238,7 +1404,7 @@ export default function App() {
 
 function AuthLanding({ onLogin }: { onLogin: () => void }) {
   return (
-    <div className="h-screen bg-paper flex flex-col items-center justify-center p-12 text-center text-ink selection:bg-brand/10">
+    <div className="min-h-[100dvh] bg-paper flex flex-col items-center justify-center p-6 sm:p-12 text-center text-ink selection:bg-brand/10 safe-area-top safe-area-bottom">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1252,7 +1418,7 @@ function AuthLanding({ onLogin }: { onLogin: () => void }) {
            <span>THE DAILY</span>
            <span className="serif-italic font-medium text-brand">BASELINE</span>
         </h1>
-        <p className="text-lg sm:text-xl text-zinc-400 max-w-xl mx-auto leading-relaxed mb-16 font-medium">
+        <p className="text-lg sm:text-xl text-zinc-600 max-w-xl mx-auto leading-relaxed mb-16 font-medium">
            Institutional-grade statistical analysis and direct market board anchors. No fluff, just the tape.
         </p>
         <button 
@@ -1260,7 +1426,7 @@ function AuthLanding({ onLogin }: { onLogin: () => void }) {
           className="group relative flex items-center gap-8 py-4 px-10 border border-zinc-200 rounded-full hover:border-[#2D4A3E]/30 hover:bg-[#2D4A3E]/5 transition-all duration-500 overflow-hidden"
         >
           <div className="text-[11px] font-bold uppercase tracking-[0.4em] text-zinc-500 group-hover:text-brand transition-colors z-10 relative">Enter Board</div>
-          <ChevronRight size={14} className="text-zinc-300 group-hover:text-brand group-hover:translate-x-2 transition-all duration-500 z-10 relative" />
+          <ChevronRight size={14} className="text-zinc-500 group-hover:text-brand group-hover:translate-x-2 transition-all duration-500 z-10 relative" />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2D4A3E]/5 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
         </button>
       </motion.div>
@@ -1271,11 +1437,11 @@ function AuthLanding({ onLogin }: { onLogin: () => void }) {
          transition={{ delay: 0.5, duration: 1 }}
          className="absolute bottom-12 flex items-center gap-8"
       >
-         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-300">MLB</span>
+         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500">MLB</span>
          <span className="w-1 h-1 bg-zinc-200 rounded-full" />
-         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-300">NBA</span>
+         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500">NBA</span>
          <span className="w-1 h-1 bg-zinc-200 rounded-full" />
-         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-300">Direct Feed</span>
+         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500">Direct Feed</span>
       </motion.div>
     </div>
   );
@@ -1287,11 +1453,11 @@ function SideNavIcon({ active, onClick, icon }: { active: boolean, onClick: () =
   return (
     <button 
       onClick={onClick}
-      className="relative flex flex-col items-center group transition-all duration-300"
+      className="relative flex flex-col items-center group transition-all duration-300 focus-visible:outline-none"
     >
       <div className={cn(
         "w-10 h-10 flex items-center justify-center transition-all rounded-[14px]",
-        active ? "bg-zinc-200/60 text-ink shadow-sm" : "text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100/50"
+        active ? "bg-zinc-200/60 text-ink shadow-sm" : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/50"
       )}>
         {icon}
       </div>
@@ -1331,14 +1497,14 @@ function DeployDocumentBtn({ content }: { content: string }) {
         <span className="text-[10px] text-brand">Deployed!</span>
         <button 
           onClick={() => navigator.clipboard.writeText(deployedUrl)}
-          className="text-zinc-400 hover:text-zinc-600 transition-colors" 
+          className="text-zinc-500 hover:text-zinc-700 transition-colors" 
           title="Copy Link"
         >
           <Copy size={14} />
         </button>
         <button 
-          onClick={() => window.open(deployedUrl, '_blank')}
-          className="text-zinc-400 hover:text-brand transition-colors" 
+          onClick={() => window.open(deployedUrl, '_blank', 'noopener,noreferrer')}
+          className="text-zinc-500 hover:text-brand transition-colors" 
           title="Open in new tab"
         >
           <Globe size={14} />
@@ -1349,7 +1515,7 @@ function DeployDocumentBtn({ content }: { content: string }) {
 
   return (
     <button 
-      className="text-zinc-400 hover:text-brand transition-colors" 
+      className="text-zinc-500 hover:text-brand transition-colors" 
       title="Generate Shareable Link"
       onClick={handleDeploy}
       disabled={isDeploying}
@@ -1361,6 +1527,7 @@ function DeployDocumentBtn({ content }: { content: string }) {
 
 function ChatMessageItem({ m }: { m: ChatMessage }) {
   const isAI = m.role === 'model';
+  const renderText = isAI ? sanitizeConsumerSportsText(m.text) : m.text;
   return (
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
@@ -1369,21 +1536,21 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
     >
       <div className="space-y-4">
         <div className={cn("flex items-center gap-3", !isAI && "justify-end")}>
-          <span className="text-[8px] font-bold uppercase tracking-[0.4em] text-zinc-300">
+          <span className="text-[8px] font-bold uppercase tracking-[0.4em] text-zinc-500">
             {isAI ? 'Analysis' : 'You'}
           </span>
           <span className="w-1 h-1 bg-zinc-50 rounded-full" />
-          <span className="text-[8px] font-mono text-zinc-200 uppercase tabular-nums">06:05:26</span>
+          <span className="text-[8px] font-mono text-zinc-500 uppercase tabular-nums">06:05:26</span>
         </div>
         <div className={cn(
           "text-sm leading-[1.8] tracking-tight",
-          isAI ? "text-zinc-600 prose prose-emerald max-w-none prose-sm font-normal" : "text-ink font-medium serif-italic text-lg px-6 border-r border-brand/20"
+          isAI ? "text-zinc-700 prose prose-emerald max-w-none prose-sm font-normal" : "text-ink font-medium serif-italic text-lg px-6 border-r border-brand/20"
         )}>
           {isAI ? (
             <ReactMarkdown 
               remarkPlugins={[remarkGfm]}
               components={{
-              p: ({ children }) => <p className="mb-8 last:mb-0 text-zinc-500 leading-[1.8]">{children}</p>,
+              p: ({ children }) => <p className="mb-7 last:mb-0 text-zinc-700 leading-[1.85]">{children}</p>,
               strong: ({ children }) => <strong className="text-ink font-semibold">{children}</strong>,
               table: ({ children }) => (
                 <div className="w-full overflow-x-auto my-8 rounded-2xl border border-zinc-200/60 shadow-sm bg-white/50 backdrop-blur-sm">
@@ -1395,7 +1562,7 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
               thead: ({ children }) => <thead className="bg-zinc-50/50 border-b border-zinc-200/60">{children}</thead>,
               tbody: ({ children }) => <tbody className="divide-y divide-zinc-100/60">{children}</tbody>,
               tr: ({ children, isHeader, ...props }: any) => <tr className="hover:bg-zinc-50/80 transition-colors" {...props}>{children}</tr>,
-              th: ({ children }) => <th className="px-4 py-3 font-medium text-[10px] text-zinc-400 uppercase tracking-widest">{children}</th>,
+              th: ({ children }) => <th className="px-4 py-3 font-medium text-[10px] text-zinc-500 uppercase tracking-widest">{children}</th>,
               td: ({ children }) => {
                 let numValue = NaN;
                 
@@ -1469,14 +1636,14 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                           <div className="flex items-center gap-2">
                             <DeployDocumentBtn content={codeString} />
                             <button 
-                              className="text-zinc-400 hover:text-zinc-600 transition-colors" 
+                              className="text-zinc-500 hover:text-zinc-700 transition-colors" 
                               title="Copy HTML"
                               onClick={() => navigator.clipboard.writeText(codeString)}
                             >
                               <Copy size={14} />
                             </button>
                             <button 
-                              className="text-zinc-400 hover:text-zinc-600 transition-colors" 
+                              className="text-zinc-500 hover:text-zinc-700 transition-colors" 
                               title="Show Source"
                               onClick={(e) => {
                                 const el = (e.target as HTMLElement).closest('.rounded-xl')?.querySelector('.raw-source');
@@ -1492,7 +1659,8 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                             <iframe 
                                srcDoc={codeString} 
                                className="w-full h-full min-h-[500px] border-none"
-                               sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                               sandbox=""
+                               referrerPolicy="no-referrer"
                             />
                             <div className="raw-source hidden absolute inset-0 bg-black/90 p-6 overflow-auto">
                               <pre className="text-zinc-300 text-xs font-mono whitespace-pre-wrap">{codeString}</pre>
@@ -1507,14 +1675,14 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                     <div className="my-8 overflow-hidden rounded-xl border border-zinc-200 bg-[#1c1917] shadow-sm">
                       <div className="flex items-center justify-between border-b border-zinc-800 bg-[#292524] px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <TerminalSquare size={14} className="text-zinc-400" />
+                          <TerminalSquare size={14} className="text-zinc-300" />
                           <span className="font-mono text-[11px] font-medium text-zinc-300 uppercase tracking-wider">
                             {match[1]} Artifact // Analytical Model
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
                           <button 
-                            className="text-zinc-400 hover:text-white transition-colors" 
+                            className="text-zinc-300 hover:text-white transition-colors" 
                             title="Copy code"
                             onClick={() => navigator.clipboard.writeText(codeString)}
                           >
@@ -1539,10 +1707,10 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                 return <code className="bg-zinc-50 px-1 py-0.5 rounded font-mono text-[10px] text-zinc-800 border border-zinc-100"{...props}>{children}</code>;
               }
             }}>
-              {m.text}
+              {renderText}
             </ReactMarkdown>
           ) : (
-            m.text
+            renderText
           )}
         </div>
       </div>
@@ -1566,40 +1734,50 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className={cn(
-          "bg-white border rounded-2xl p-8 space-y-10 group transition-all cursor-pointer h-full card-hover",
+          "bg-white border rounded-2xl p-5 sm:p-6 space-y-6 group transition-all cursor-pointer h-full card-hover",
           odd.status === 'live' ? "border-brand/40 bg-brand/5" : "border-zinc-100 hover:border-zinc-200"
         )}
       >
         <div className="flex justify-between items-start">
            <div className="space-y-1 flex items-center gap-3">
               {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
-              <span className="text-[8px] text-zinc-400 uppercase tracking-[0.4em] font-bold">
+              <span className="text-[8px] text-zinc-500 uppercase tracking-[0.4em] font-bold">
                  {odd.sport_title} {odd.status === 'live' ? '• LIVE' : odd.status === 'final' ? '• FINAL' : `• ${new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`}
               </span>
            </div>
         </div>
-        <div className="-mt-6">
+        <div>
            <h4 className="text-2xl serif-italic font-medium text-ink tracking-tight">{odd.away_team.split(' ').pop()} @ {odd.home_team.split(' ').pop()}</h4>
         </div>
 
-        <div className="space-y-8">
-         <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
-            <img src={getLogo(odd.home_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
-            <div className="flex flex-col">
-               <span className="text-xs font-semibold text-ink">{odd.home_team}</span>
-               <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-widest">Anchored Home</span>
-            </div>
-            <PriceTag price={homePrice} />
-         </div>
+        <div className="space-y-6">
+         {odd.bookmakers?.length ? (
+           <>
+             <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
+               <img src={getLogo(odd.home_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
+               <div className="flex flex-col">
+                 <span className="text-xs font-semibold text-ink">{odd.home_team}</span>
+                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">Moneyline / Spread / Total</span>
+               </div>
+               <PriceTag price={homePrice} />
+             </div>
 
-         <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
-            <img src={getLogo(odd.away_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
-            <div className="flex flex-col">
-               <span className="text-xs font-semibold text-ink">{odd.away_team}</span>
-               <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-widest">Anchored Away</span>
-            </div>
-            <PriceTag price={awayPrice} />
-         </div>
+             <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
+               <img src={getLogo(odd.away_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
+               <div className="flex flex-col">
+                 <span className="text-xs font-semibold text-ink">{odd.away_team}</span>
+                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">Moneyline / Spread / Total</span>
+               </div>
+               <PriceTag price={awayPrice} />
+             </div>
+           </>
+         ) : (
+           <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-3 py-4">
+             <span className="text-[10px] uppercase tracking-widest text-zinc-500">
+               {describeOddsLine(odd) || "ESPN checked. Market odds not found yet."}
+             </span>
+           </div>
+         )}
 
          {/* Pitcher Matchup */}
          {(odd.home_pitcher || odd.away_pitcher) && (
@@ -1608,7 +1786,7 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
               <div className="w-1.5 h-1.5 rotate-45 bg-[#2D4A3E] shrink-0 opacity-80" />
               <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Pitching Matchup</span>
             </div>
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <PitcherDisplay 
                 teamFull={odd.away_team} 
                 name={odd.away_pitcher} 
@@ -1627,18 +1805,20 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
          )}
       </div>
 
-      <div className="pt-8 border-t border-zinc-50">
-         <div className="grid grid-cols-3 gap-8">
+      <div className="pt-6 border-t border-zinc-50">
+         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-8">
+            {odd.bookmakers?.length ? (
             <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-300 uppercase font-bold tracking-widest">Total</span>
+               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">Total</span>
                <span className="font-mono text-xs font-bold text-zinc-500">{totalPoint}</span>
             </div>
+            ) : null}
             <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-300 uppercase font-bold tracking-widest">{odd.away_team.split(' ').pop()} Last 10</span>
+               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.away_team.split(' ').pop()} Last 10</span>
                <span className="font-mono text-xs font-bold text-zinc-500">6-4 U</span>
             </div>
             <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-300 uppercase font-bold tracking-widest">{odd.home_team.split(' ').pop()} Last 10</span>
+               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.home_team.split(' ').pop()} Last 10</span>
                <span className="font-mono text-xs font-bold text-zinc-500">7-3 U</span>
             </div>
          </div>
@@ -1671,7 +1851,7 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
 
   if (!odd) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-400">
+      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-500">
         <p>Game not found.</p>
         <button className="mt-4 text-brand hover:underline" onClick={() => navigate('/')}>Back to Board</button>
       </div>
@@ -1679,13 +1859,13 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
   }
 
   return (
-    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar p-12 bg-white">
+    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar p-4 sm:p-6 xl:p-10 bg-white">
       <div className="max-w-4xl mx-auto w-full">
-        <button className="text-[10px] items-center flex gap-2 font-bold uppercase tracking-widest text-zinc-400 hover:text-ink mb-12 transition-colors" onClick={() => navigate('/')}>
+        <button className="text-[10px] items-center flex gap-2 font-bold uppercase tracking-widest text-zinc-500 hover:text-ink mb-8 transition-colors" onClick={() => navigate('/')}>
           <ChevronRight size={14} className="rotate-180" /> Back to Daily Board
         </button>
 
-        <h1 className="text-5xl font-medium serif-italic text-ink mb-6">{odd.away_team} @ {odd.home_team}</h1>
+        <h1 className="text-3xl sm:text-5xl font-medium serif-italic text-ink mb-6">{odd.away_team} @ {odd.home_team}</h1>
         
         <div className="flex items-center gap-4 mb-12">
            <span className={cn("px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest", odd.status === 'live' ? "bg-brand text-white animate-pulse" : "bg-zinc-100 text-zinc-500")}>
@@ -1694,9 +1874,9 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
            <span className="text-sm font-mono text-zinc-500">{new Date(odd.commence_time).toLocaleString()} • {odd.venue || "TBA"}</span>
         </div>
 
-        <div className="grid grid-cols-2 gap-12 border-t border-zinc-100 pt-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 border-t border-zinc-100 pt-10">
             <div className="flex flex-col gap-6">
-                <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest">Away Side</span>
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Away Side</span>
                 <div className="flex items-center gap-4">
                   <img src={getEspnLogo(odd.away_team)} className="w-16 h-16 rounded-full border border-zinc-100" alt="" />
                   <div>
@@ -1709,7 +1889,7 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
                 </div>
             </div>
             <div className="flex flex-col gap-6 text-right items-end">
-                 <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest">Home Side</span>
+                 <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Home Side</span>
                  <div className="flex items-center gap-4 flex-row-reverse">
                    <img src={getEspnLogo(odd.home_team)} className="w-16 h-16 rounded-full border border-zinc-100" alt="" />
                    <div className="flex flex-col items-end">
@@ -1724,28 +1904,28 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
         </div>
 
         <div className="flex justify-center mt-8 mb-4">
-          <div className="bg-zinc-50 border border-zinc-100 rounded-lg px-6 py-4 flex items-center gap-12 font-mono text-sm">
+          <div className="bg-zinc-50 border border-zinc-100 rounded-lg px-4 sm:px-6 py-4 flex items-center gap-6 sm:gap-12 font-mono text-sm">
              <div className="flex flex-col items-center">
-                 <span className="text-[10px] text-zinc-400 font-sans font-bold uppercase mb-1">Total</span>
+                 <span className="text-[10px] text-zinc-500 font-sans font-bold uppercase mb-1">Total</span>
                  <span className="text-ink font-bold">{totalPoint !== "-" ? `O/U ${totalPoint}` : "N/A"}</span>
              </div>
              <div className="flex flex-col items-center">
-                 <span className="text-[10px] text-zinc-400 font-sans font-bold uppercase mb-1">Status</span>
+                 <span className="text-[10px] text-zinc-500 font-sans font-bold uppercase mb-1">Status</span>
                  <span className="text-brand font-bold">{odd.status === 'final' ? 'Final' : (odd.situation || 'Pregame')}</span>
              </div>
           </div>
         </div>
 
         {(odd.away_pitcher || odd.home_pitcher) && (
-            <div className="mt-16 bg-zinc-50 p-8 rounded-xl border border-zinc-100">
-               <h3 className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-400 mb-8 flex items-center gap-3">
+            <div className="mt-10 sm:mt-16 bg-zinc-50 p-6 sm:p-8 rounded-xl border border-zinc-100">
+               <h3 className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500 mb-8 flex items-center gap-3">
                  <div className="w-2 h-2 rotate-45 bg-[#2D4A3E]" />
                  Pitching Matchup
                </h3>
                
-               <div className="grid grid-cols-2 gap-8 items-start">
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 items-start">
                    <div className="flex flex-col gap-2">
-                       <span className="text-sm font-bold text-zinc-400 uppercase">{odd.away_team.split(' ').pop()} (A)</span>
+                       <span className="text-sm font-bold text-zinc-500 uppercase">{odd.away_team.split(' ').pop()} (A)</span>
                        <div className="flex items-center gap-3">
                          <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
                            <img src={odd.away_pitcher_headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.away_pitcher || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`} alt={odd.away_pitcher} className="w-full h-full object-cover scale-110" />
@@ -1757,7 +1937,7 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
                        </div>
                    </div>
                    <div className="flex flex-col gap-2 text-right items-end">
-                       <span className="text-sm font-bold text-zinc-400 uppercase">{odd.home_team.split(' ').pop()} (H)</span>
+                       <span className="text-sm font-bold text-zinc-500 uppercase">{odd.home_team.split(' ').pop()} (H)</span>
                        <div className="flex items-center gap-3 flex-row-reverse">
                          <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
                            <img src={odd.home_pitcher_headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.home_pitcher || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`} alt={odd.home_pitcher} className="w-full h-full object-cover scale-110" />

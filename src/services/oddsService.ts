@@ -17,6 +17,13 @@ export interface Bookmaker {
   markets: Market[];
 }
 
+export interface MarketDataStatus {
+  state: "grounded" | "partial" | "failed";
+  code?: string;
+  message?: string;
+  allowed_output?: string;
+}
+
 export interface SportOdds {
   id: string;
   sport_key: string;
@@ -38,6 +45,13 @@ export interface SportOdds {
   away_pitcher_record?: string;
   venue?: string;
   result_context?: string;
+  event_id?: string;
+  source_url?: string;
+  fetched_at?: string;
+  market_data_status?: MarketDataStatus;
+  inning?: number | string;
+  inning_half?: string;
+  espn_grounding?: unknown;
   bookmakers: Bookmaker[];
 }
 

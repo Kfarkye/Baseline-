@@ -1,3 +1,5 @@
+import { auth } from '../lib/firebase';
+
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
@@ -5,9 +7,17 @@ export interface ChatMessage {
 
 export async function getBettingInsights(message: string, history: ChatMessage[] = [], oddsData?: any, mode?: string | null) {
   try {
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) {
+      throw new Error('Authentication required');
+    }
+
     const response = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
       body: JSON.stringify({ message, history, oddsData, mode })
     });
     

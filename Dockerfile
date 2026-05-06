@@ -15,8 +15,9 @@ RUN npm ci
 # Copy built frontend assets
 COPY --from=builder /app/dist ./dist
 
-# Copy server source + config
+# Copy server source + runtime dependencies + config
 COPY --from=builder /app/server.ts ./server.ts
+COPY --from=builder /app/src ./src
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/firebase-applet-config.json ./firebase-applet-config.json
 
