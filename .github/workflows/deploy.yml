@@ -36,7 +36,7 @@ jobs:
         run: |
           gcloud run deploy baseline-mlb \
             --source . \
-            --project workflowos-a0fbf \
+            --project gen-lang-client-0281999829 \
             --region us-central1 \
             --allow-unauthenticated \
             --update-env-vars "NODE_ENV=production" \
@@ -44,4 +44,7 @@ jobs:
             --update-secrets "FIREBASE_SERVICE_ACCOUNT=firebase_service_account:latest" \
             --update-secrets "ODDS_API_KEY=odds_api_key:latest" \
             --update-secrets "GEMINI_API_KEY=gemini_api_key:latest"
+          
+          SERVICE_URL=$(gcloud run services describe baseline-mlb --project gen-lang-client-0281999829 --region us-central1 --format='value(status.url)')
+          curl -s -f "$SERVICE_URL" || (echo "Deployment smoke check failed" && exit 1)
 

@@ -19,6 +19,7 @@ import {
 import { auth, db } from './lib/firebase';
 import { 
   signInWithPopup, 
+  signInWithRedirect,
   GoogleAuthProvider, 
   onAuthStateChanged, 
   signOut,
@@ -57,6 +58,7 @@ interface UserData {
   displayName: string;
   balance: number;
   planTier: 'free' | 'pro' | 'sharp';
+  isAdmin?: boolean;
   queryCount: number;
   lastQueryDate: string;
   preferences: {
@@ -130,10 +132,10 @@ function PitcherDisplay({ teamFull, headshot, name, record, alignRight = false, 
       </div>
       <div className={`flex flex-col ${alignRight ? 'items-end' : ''}`}>
         <div className={`flex items-center gap-1.5 mb-0.5 ${alignRight ? 'flex-row-reverse' : ''}`}>
-          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">{teamAbbr.toUpperCase()}</span>
+          <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{teamAbbr.toUpperCase()}</span>
         </div>
-        <span className={`${small ? 'text-xs' : 'text-sm'} font-semibold text-ink leading-none mb-1`}>{name || 'TBA'}</span>
-        <span className="text-[10px] font-mono text-zinc-500">{record || '-'}</span>
+        <span className={`${small ? 'text-xs' : 'text-sm'} font-semibold text-zinc-700 leading-none mb-1`}>{name || 'TBA'}</span>
+        <span className="text-[10px] font-mono text-zinc-800">{record || '-'}</span>
       </div>
     </div>
   );
@@ -176,10 +178,10 @@ export default function App() {
   }, []);
 
   const categorizeGame = (commenceTime: string): 'previous' | 'today' | 'tomorrow' => {
-    const d = new Date(commenceTime);
-    // Since API might return old games depending on feed, we will compare against the API response time if available
-    // or just assume local time.
-    const today = new Date();
+    // Shift game time and current time back by 10 hours (e.g. rollover at 6 AM ET)
+    // This prevents late-night West Coast games from disappearing into 'previous' at midnight PT.
+    const d = new Date(new Date(commenceTime).getTime() - 10 * 3600 * 1000);
+    const today = new Date(new Date().getTime() - 10 * 3600 * 1000);
     const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     const tDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const diffDays = Math.round((dDay.getTime() - tDay.getTime()) / (1000 * 3600 * 24));
@@ -244,7 +246,8 @@ export default function App() {
               email: u.email || '',
               displayName: u.displayName || 'Punter',
               balance: 0,
-              planTier: 'free',
+              planTier: u.email === 'kofi.farkye@gmail.com' ? 'sharp' : 'free',
+              isAdmin: u.email === 'kofi.farkye@gmail.com',
               queryCount: 0,
               lastQueryDate: today,
               preferences: { favoriteLeagues: [], riskLevel: 'medium' }
@@ -253,6 +256,14 @@ export default function App() {
             setUserData(newUserData);
           } else {
             const data = userSnap.data() as UserData;
+            
+            // Auto-elevate kofi.farkye@gmail.com
+            if (u.email === 'kofi.farkye@gmail.com' && (!data.isAdmin || data.planTier !== 'sharp')) {
+              data.isAdmin = true;
+              data.planTier = 'sharp';
+              await updateDoc(userRef, { isAdmin: true, planTier: 'sharp' });
+            }
+
             setUserData(data);
 
             if (data.lastQueryDate !== today) {
@@ -261,13 +272,21 @@ export default function App() {
             }
           }
 
-          // Setup Chat Listener
+          // Setup Chat Listener without orderBy to avoid missing index errors
           const q = query(
-            collection(db, 'users', u.uid, 'chats'),
-            orderBy('timestamp', 'asc')
+            collection(db, 'users', u.uid, 'chats')
           );
           onSnapshot(q, (snapshot) => {
-            setMessages(snapshot.docs.map(d => d.data() as ChatMessage));
+            const msgs = snapshot.docs.map(d => d.data() as any);
+            // Sort locally
+            msgs.sort((a, b) => {
+              const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : Date.now();
+              const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : Date.now();
+              return aTime - bTime;
+            });
+            setMessages(msgs as ChatMessage[]);
+          }, (err) => {
+            console.error("Chat listener failed:", err);
           });
 
           // Setup Artifacts Listener
@@ -313,7 +332,9 @@ export default function App() {
   };
 
   const handleLogin = () => {
-    signInWithPopup(auth, new GoogleAuthProvider());
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    signInWithRedirect(auth, provider);
   };
 
   const handleLogout = () => signOut(auth);
@@ -415,15 +436,15 @@ export default function App() {
     );
   }
 
-  // Adjust active tab if no user
+  // Adjust active tab if no user — only block artifacts since it depends on user.uid query
   React.useEffect(() => {
-    if (!user && (activeTab === 'chat' || activeTab === 'ledger' || activeTab === 'wallet')) {
+    if (!user && activeTab === 'artifacts') {
       setActiveTab('odds');
     }
   }, [user, activeTab]);
 
   return (
-    <div className="flex h-screen bg-paper text-ink font-sans overflow-hidden relative">
+    <div className="flex h-[100dvh] bg-paper text-ink font-sans overflow-hidden relative">
       {/* Subtle Ambient Bleed */}
       <div className="ambient-blob ambient-blob-1"></div>
       <div className="ambient-blob ambient-blob-2"></div>
@@ -461,51 +482,45 @@ export default function App() {
         )}
       </AnimatePresence>
       {/* Primary Global Navigation */}
-      <aside className="w-16 flex flex-col items-center py-10 border-r border-zinc-200 bg-paper shrink-0 z-30">
-        <div className="mb-14">
+      <aside className="w-16 flex flex-col items-center py-8 border-r border-zinc-200 bg-paper shrink-0 z-30">
+        <div className="mb-10">
           <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none">B</div>
         </div>
         
-        <nav className="flex flex-col gap-12 flex-1">
-          {user && (
+        <nav className="flex flex-col gap-6 flex-1">
             <SideNavIcon 
               active={activeTab === 'chat'} 
               onClick={() => setActiveTab('chat')}
-              icon={<MessageSquare size={18} strokeWidth={1.2} />}
+              icon={<MessageSquare size={20} strokeWidth={1.5} />}
             />
-          )}
           <SideNavIcon 
             active={activeTab === 'odds'} 
             onClick={() => setActiveTab('odds')}
-            icon={<TrendingUp size={18} strokeWidth={1.2} />}
+            icon={<TrendingUp size={20} strokeWidth={1.5} />}
           />
-          {user && (
-            <>
               <SideNavIcon 
                 active={activeTab === 'ledger'} 
                 onClick={() => setActiveTab('ledger')}
-                icon={<BarChart size={18} strokeWidth={1.2} />}
+                icon={<BarChart size={20} strokeWidth={1.5} />}
               />
               <SideNavIcon 
                 active={activeTab === 'wallet'} 
                 onClick={() => setActiveTab('wallet')}
-                icon={<Calendar size={18} strokeWidth={1.2} />}
+                icon={<Calendar size={20} strokeWidth={1.5} />}
               />
               <SideNavIcon 
                 active={activeTab === 'artifacts'} 
-                onClick={() => setActiveTab('artifacts')}
-                icon={<FileText size={18} strokeWidth={1.2} />}
+                onClick={() => user ? setActiveTab('artifacts') : handleLogin()}
+                icon={<FileText size={20} strokeWidth={1.5} />}
               />
-            </>
-          )}
         </nav>
 
-        <div className="mt-auto flex flex-col gap-8 items-center">
-          <button onClick={() => setShowAboutModal(true)} className="text-zinc-400 hover:text-ink transition-colors duration-300">
-            <Info size={16} strokeWidth={1.2} />
+        <div className="mt-auto flex flex-col gap-6 items-center">
+          <button onClick={() => setShowAboutModal(true)} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-zinc-400 hover:text-zinc-800 hover:bg-zinc-50/80 transition-all duration-300">
+            <Info size={20} strokeWidth={1.5} />
           </button>
-          <button onClick={() => navigate('/pricing')} className="text-brand hover:text-ink transition-colors duration-300">
-            <Zap size={16} strokeWidth={1.2} />
+          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-brand hover:bg-brand/10 transition-all duration-300 mb-2">
+            <Zap size={20} strokeWidth={1.5} />
           </button>
         </div>
       </aside>
@@ -557,7 +572,7 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 bg-paper">
         {/* Unified Header */}
-        <header className="h-16 flex items-center justify-between px-6 xl:px-12 border-b border-zinc-100 bg-paper/80 backdrop-blur-md sticky top-0 z-20">
+        <header className="h-16 flex items-center justify-between px-6 xl:px-12 border-b border-zinc-100/80 bg-paper/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20">
           <div className="flex items-center gap-6">
             {location.pathname !== '/' && (
               <h1 className="text-[10px] font-bold tracking-[0.5em] text-zinc-400 uppercase">
@@ -588,7 +603,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <button onClick={handleLogin} className="bg-ink hover:bg-brand text-white text-xs font-bold uppercase tracking-widest px-4 py-2 rounded-full transition-colors">
+              <button onClick={handleLogin} className="bg-ink hover:bg-brand text-white text-xs font-bold uppercase tracking-widest px-5 py-2.5 rounded-full transition-all hover:shadow-lg hover:shadow-brand/20 active:scale-[0.98]">
                 Sign In
               </button>
             )}
@@ -608,7 +623,7 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="h-full flex flex-col max-w-4xl mx-auto w-full"
                 >
-                  <div className="flex-1 px-12 py-12 overflow-y-auto space-y-16 custom-scrollbar">
+                  <div className="flex-1 px-12 py-8 overflow-y-auto space-y-12 custom-scrollbar">
                     {messages.length === 0 && (
                       <div className="pb-12 pt-8">
                         <div className="mb-8">
@@ -643,7 +658,7 @@ export default function App() {
                                 <div className="flex justify-between items-start">
                                   <div>
                                     <div className="flex items-center gap-2 mb-1">
-                                      {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand animate-pulse shrink-0" />}
+                                      {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
                                       <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{odd.sport_title} {odd.status === 'live' ? '• LIVE' : ''}</span>
                                     </div>
                                     <span className="text-xs font-mono text-zinc-500">{odd.venue || 'TBA'} • {new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -755,7 +770,7 @@ export default function App() {
                    </div>
                    
                    {/* Minimal Input Area */}
-                   <div className="p-6 md:p-12 sticky bottom-0 bg-paper/80 backdrop-blur-xl border-t border-zinc-100/50 flex flex-col z-20">
+                   <div className="p-6 md:p-8 sticky bottom-0 bg-paper border-t border-zinc-100/50 flex flex-col z-20">
                      <div className="flex gap-2 mb-3">
                        {(['live', 'stats', 'trends'] as const).map(mode => {
                          const isActive = groundingMode === mode;
@@ -1044,12 +1059,12 @@ export default function App() {
 
             <div className={cn("xl:block", !isSlateExpanded && "hidden")}>
               {/* Full Slate */}
-              <div className="border-b border-zinc-100">
-                <div className="hidden xl:flex flex-col border-b border-zinc-100 bg-white sticky top-0 z-10 pt-4">
+              <div className="border-b border-black/10">
+                <div className="hidden xl:flex flex-col border-b border-black/10 bg-white sticky top-0 z-10 pt-4">
                   <div className="px-10 mb-4 flex justify-between items-center">
-                    <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">Full Slate</span>
+                    <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Full Slate</span>
                   </div>
-                  <div className="flex w-full overflow-x-auto no-scrollbar border-t border-zinc-50">
+                  <div className="flex w-full overflow-x-auto no-scrollbar border-t border-black/10">
                     {['previous', 'today', 'tomorrow'].map(filter => (
                       <button
                         key={filter}
@@ -1058,7 +1073,7 @@ export default function App() {
                           "flex-1 text-[9px] uppercase tracking-widest font-bold py-3 text-center transition-colors border-b-2 hover:bg-zinc-50",
                           slateFilter === filter 
                             ? "border-brand text-brand" 
-                            : "border-transparent text-zinc-400 hover:text-ink"
+                            : "border-transparent text-zinc-500 hover:text-zinc-800"
                         )}
                       >
                         {filter}
@@ -1096,8 +1111,8 @@ export default function App() {
                         <div className="w-full flex items-center justify-between">
                           <div>
                             <div className="flex items-center gap-2 mb-1">
-                              {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-brand animate-pulse" />}
-                              <span className="text-[10px] font-mono text-zinc-400 group-hover:text-ink transition-colors">
+                              {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-brand live-pulse" />}
+                              <span className="text-[10px] font-mono text-zinc-500 group-hover:text-zinc-800 transition-colors">
                               {odd.status === 'live' ? (
                                   <>LIVE{odd.situation ? ` • ${odd.situation}` : ''}</>
                                 ) : odd.status === 'final' ? (
@@ -1105,10 +1120,10 @@ export default function App() {
                                 ) : (
                                   new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
                                 )}
-                                {bookmaker?.title && <span className="ml-2 uppercase tracking-wide text-[9px] text-zinc-300">({bookmaker.title})</span>}
+                                {bookmaker?.title && <span className="ml-2 uppercase tracking-wide text-[9px] text-zinc-500">({bookmaker.title})</span>}
                               </span>
                             </div>
-                            <div className="text-sm serif text-ink mt-1">
+                            <div className="text-sm serif text-zinc-800 mt-1">
                               {odd.status === 'live' || odd.status === 'final' ? (
                                 <div className="flex flex-col gap-1">
                                   <span>{odd.away_team} <span className="font-mono font-bold text-xs ml-1">{odd.away_score || "0"}</span></span>
@@ -1122,14 +1137,14 @@ export default function App() {
                           <div className="text-right flex flex-col items-end gap-1.5">
                             {moneylineStr && (
                               <div className="text-right">
-                                <span className="text-[10px] uppercase tracking-widest text-zinc-400 mr-2">ML</span>
-                                <span className="font-mono text-sm text-ink">{moneylineStr}</span>
+                                <span className="text-[10px] uppercase tracking-widest text-zinc-500 mr-2">ML</span>
+                                <span className="font-mono text-sm text-zinc-800">{moneylineStr}</span>
                               </div>
                             )}
                             {totalPoint && (
                               <div className="text-right">
-                                <span className="text-[10px] uppercase tracking-widest text-zinc-400 mr-2">O/U</span>
-                                <span className="font-mono text-sm text-ink">{totalPoint}</span>
+                                <span className="text-[10px] uppercase tracking-widest text-zinc-500 mr-2">O/U</span>
+                                <span className="font-mono text-sm text-zinc-800">{totalPoint}</span>
                               </div>
                             )}
                           </div>
@@ -1137,10 +1152,10 @@ export default function App() {
 
                         {/* Yahoo Sports Style Pitcher Diamond */}
                         {(odd.away_pitcher || odd.home_pitcher) && (
-                          <div className="w-full mt-4 pt-3 border-t border-zinc-100/60 transition-opacity">
+                          <div className="w-full mt-4 pt-3 border-t border-black/10 transition-opacity">
                             <div className="flex items-center gap-2 mb-3">
                               <div className="w-1.5 h-1.5 rotate-45 bg-zinc-300 group-hover:bg-brand transition-colors shrink-0" />
-                              <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-400 group-hover:text-brand transition-colors">Pitching Matchup</span>
+                              <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500 group-hover:text-brand transition-colors">Pitching Matchup</span>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                               <PitcherDisplay 
@@ -1272,23 +1287,14 @@ function SideNavIcon({ active, onClick, icon }: { active: boolean, onClick: () =
   return (
     <button 
       onClick={onClick}
-      className={cn(
-        "relative flex flex-col items-center group transition-all duration-300",
-        active ? "text-brand" : "text-zinc-300 hover:text-zinc-500"
-      )}
+      className="relative flex flex-col items-center group transition-all duration-300"
     >
       <div className={cn(
-        "w-8 h-8 flex items-center justify-center transition-all",
-        active ? "scale-110" : "hover:scale-105"
+        "w-10 h-10 flex items-center justify-center transition-all rounded-[14px]",
+        active ? "bg-zinc-200/60 text-ink shadow-sm" : "text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100/50"
       )}>
         {icon}
       </div>
-      {active && (
-        <motion.div 
-          layoutId="active-nav"
-          className="absolute -right-8 w-1 h-1 bg-brand rounded-full"
-        />
-      )}
     </button>
   );
 }
@@ -1560,13 +1566,13 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className={cn(
-          "bg-white border rounded-2xl p-8 space-y-10 group transition-all shadow-sm hover:shadow-md cursor-pointer h-full",
+          "bg-white border rounded-2xl p-8 space-y-10 group transition-all cursor-pointer h-full card-hover",
           odd.status === 'live' ? "border-brand/40 bg-brand/5" : "border-zinc-100 hover:border-zinc-200"
         )}
       >
         <div className="flex justify-between items-start">
            <div className="space-y-1 flex items-center gap-3">
-              {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand animate-pulse shrink-0" />}
+              {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
               <span className="text-[8px] text-zinc-400 uppercase tracking-[0.4em] font-bold">
                  {odd.sport_title} {odd.status === 'live' ? '• LIVE' : odd.status === 'final' ? '• FINAL' : `• ${new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`}
               </span>
