@@ -23,7 +23,7 @@ export function PricingView({ user, onSubscribe }: { user: any, onSubscribe: (ti
            <ul className="space-y-4 mb-auto">
              <li className="flex items-start gap-3"><Check size={16} className="text-brand mt-1 shrink-0" /><span className="text-sm text-zinc-700">Daily slate view</span></li>
              <li className="flex items-start gap-3"><Check size={16} className="text-brand mt-1 shrink-0" /><span className="text-sm text-zinc-700">Recent finals</span></li>
-             <li className="flex items-start gap-3"><Check size={16} className="text-brand mt-1 shrink-0" /><span className="text-sm text-zinc-700">5 chat questions per day</span></li>
+             <li className="flex items-start gap-3"><Check size={16} className="text-brand mt-1 shrink-0" /><span className="text-sm text-zinc-700">Unlimited chat questions</span></li>
              <li className="flex items-start gap-3"><Check size={16} className="text-brand mt-1 shrink-0" /><span className="text-sm text-zinc-700">Sign up required</span></li>
            </ul>
            

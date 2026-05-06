@@ -44,12 +44,10 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 
-const FREE_DAILY_CHAT_LIMIT = 5;
 const MAX_PAYMENT_AMOUNT_USD = 5000;
 const MIN_PAYMENT_AMOUNT_USD = 1;
 const CHAT_RATE_WINDOW_MS = 60_000;
 const CHAT_RATE_WINDOW_MAX = 12;
-const USER_PLAN_CACHE_TTL_MS = 60_000;
 const MAX_CHAT_MESSAGE_CHARS = 8000;
 const MAX_CHAT_HISTORY_ITEMS = 40;
 const MAX_CHAT_HISTORY_ITEM_CHARS = 12_000;
@@ -71,8 +69,6 @@ interface VerifiedFirebaseUser {
   email?: string;
 }
 
-type PlanTier = "free" | "pro" | "sharp";
-
 interface BoardEvent extends NormalizedEspnScoreboardEvent {
   sport_key: string;
   sport_title: string;
@@ -82,8 +78,6 @@ interface BoardEvent extends NormalizedEspnScoreboardEvent {
 }
 
 let adminInitialized = false;
-const dailyChatUsage = new Map<string, { date: string; count: number }>();
-const userPlanCache = new Map<string, { planTier: PlanTier; expiresAt: number }>();
 const chatRateWindow = new Map<string, number[]>();
 
 function getBearerToken(authHeader: string | undefined): string | null {
@@ -91,10 +85,6 @@ function getBearerToken(authHeader: string | undefined): string | null {
   const [scheme, token] = authHeader.split(" ");
   if (scheme !== "Bearer" || !token) return null;
   return token;
-}
-
-function getCurrentUtcDate(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 function extractUpstreamStatus(error: unknown): number | undefined {
@@ -181,44 +171,6 @@ function ensureFirebaseAdminInitialized(projectId: string): void {
     }
   }
   adminInitialized = true;
-}
-
-function isPaidPlan(planTier: PlanTier): boolean {
-  return planTier === "pro" || planTier === "sharp";
-}
-
-async function getTrustedUserPlanTier(uid: string): Promise<PlanTier> {
-  const cached = userPlanCache.get(uid);
-  const now = Date.now();
-  if (cached && cached.expiresAt > now) return cached.planTier;
-
-  try {
-    const db = getFirestore();
-    const userSnap = await db.collection("users").doc(uid).get();
-    const tier = userSnap.exists ? userSnap.data()?.planTier : "free";
-    const planTier: PlanTier = tier === "pro" || tier === "sharp" ? tier : "free";
-    userPlanCache.set(uid, {
-      planTier,
-      expiresAt: now + USER_PLAN_CACHE_TTL_MS,
-    });
-    return planTier;
-  } catch {
-    return "free";
-  }
-}
-
-async function getAndIncrementDailyChatUsage(uid: string): Promise<number> {
-  const today = getCurrentUtcDate();
-  const current = dailyChatUsage.get(uid);
-  if (!current || current.date !== today) {
-    const next = { date: today, count: 1 };
-    dailyChatUsage.set(uid, next);
-    return next.count;
-  }
-
-  current.count += 1;
-  dailyChatUsage.set(uid, current);
-  return current.count;
 }
 
 function isWithinBurstLimit(uid: string): boolean {
@@ -851,14 +803,6 @@ async function startServer() {
 
       if (!isWithinBurstLimit(authUser.uid)) {
         return res.status(429).json({ error: "Too many chat requests. Please slow down." });
-      }
-
-      const planTier = await getTrustedUserPlanTier(authUser.uid);
-      if (!isPaidPlan(planTier)) {
-        const count = await getAndIncrementDailyChatUsage(authUser.uid);
-        if (count > FREE_DAILY_CHAT_LIMIT) {
-          return res.status(429).json({ error: "Daily query limit reached for this account." });
-        }
       }
 
     const { message, history = [], oddsData, mode, input_sources, canonical_url } = parsed.data;

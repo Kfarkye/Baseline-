@@ -10,7 +10,6 @@ import {
   Send, 
   ChevronRight,
   LogOut,
-  AlertCircle,
   PlusCircle,
   RefreshCw,
   BarChart,
@@ -471,8 +470,6 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-
   const sendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputText.trim()) return;
@@ -481,14 +478,7 @@ export default function App() {
       return;
     }
 
-    // Use default tier if userData didn't load properly yet
-    const planTier = userData?.planTier || 'free';
     const queryCount = userData?.queryCount || 0;
-
-    if (planTier === 'free' && queryCount >= 5) {
-      setShowUpgradeModal(true);
-      return;
-    }
 
     const userMessage: ChatMessage = { role: 'user', text: inputText };
     setInputText('');
@@ -589,35 +579,6 @@ export default function App() {
       <div className="absolute inset-0 bg-paper/60 backdrop-blur-[100px] z-0 pointer-events-none" />
 
       <div className="flex h-full w-full z-10 relative flex-col md:flex-row">
-        <AnimatePresence>
-          {showUpgradeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-paper/80 backdrop-blur-sm overflow-y-auto">
-             <motion.div
-               initial={{ opacity: 0, scale: 0.95 }}
-               animate={{ opacity: 1, scale: 1 }}
-               exit={{ opacity: 0, scale: 0.95 }}
-               className="max-w-md w-full max-h-[calc(100dvh-2rem)] bg-white border border-zinc-100 rounded-2xl shadow-xl overflow-y-auto p-8 flex flex-col items-center text-center relative"
-             >
-               <button onClick={() => setShowUpgradeModal(false)} className="absolute top-6 right-6 text-zinc-400 hover:text-ink">
-                 <AlertCircle size={16} />
-               </button>
-               <div className="w-16 h-16 rounded-full bg-brand/10 text-brand flex items-center justify-center mb-6">
-                 <Zap size={24} />
-               </div>
-               <h3 className="text-2xl font-serif font-bold text-ink mb-2">You've hit the limit</h3>
-               <p className="text-zinc-600 mb-8 max-w-[280px]">
-                 Free accounts are limited to 5 AI queries per day. Upgrade to Pro for unlimited access and advanced tools.
-               </p>
-               <button 
-                 onClick={() => { setShowUpgradeModal(false); navigate('/pricing'); }}
-                 className="w-full py-4 bg-brand hover:bg-[#1E3027] text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-colors"
-               >
-                 View Plans
-               </button>
-             </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
       {/* Primary Global Navigation */}
       <aside className="w-full md:w-16 flex md:flex-col items-center md:items-center justify-between md:justify-start px-3 md:px-0 py-3 md:py-8 border-b md:border-b-0 md:border-r border-zinc-200 bg-paper shrink-0 z-30 safe-area-top safe-area-x">
         <div className="md:mb-10 shrink-0">
