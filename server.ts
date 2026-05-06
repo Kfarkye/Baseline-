@@ -245,52 +245,66 @@ function stripInternalModelTerms(text: string): string {
   return sanitized.trim() || "No publishable answer is available right now.";
 }
 
-function hasBannedMarketPhrases(text: string): boolean {
-  const lower = text.toLowerCase();
-  const banned = [
-    /\bmoneyline\b/,
-    /\bspread\b/,
-    /\btotal\b/,
-    /\bodds?\b/,
-    /\bover\s*\/\s*under\b/,
-  ];
-  return banned.some((pattern) => pattern.test(lower));
-}
-
-function isScoreOnlyOutputContext(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return (
-    /score|inning|pace|state/.test(normalized) &&
-    !/\bmoneyline\b|\bspread\b|\btotal\b|\bodds?\b/.test(normalized)
-  );
-}
-
-function sanitizeScoreOnlyOutput(text: string): string {
-  if (!hasBannedMarketPhrases(text)) return text;
+function stripRawDebugUrls(text: string): string {
   let sanitized = text;
-  const banned = [/\bmoneyline\b/gi, /\bspread\b/gi, /\b(over|under)\b/gi, /\btotal\b/gi, /\bodds?\b/gi];
-  for (const pattern of banned) {
-    sanitized = sanitized.replace(pattern, "");
-  }
-  sanitized = sanitized.replace(/\s{2,}/g, " ").trim();
-  if (!isScoreOnlyOutputContext(sanitized)) {
-    sanitized = `Allowed output: score/state/simple pace only. ${sanitized}`;
-  }
-  return stripInternalModelTerms(sanitized);
+  sanitized = sanitized.replace(
+    /\bhttps?:\/\/(?:site\.api\.espn\.com|localhost|127\.0\.0\.1)[^\s)\]]*/gi,
+    "ESPN checked"
+  );
+  sanitized = sanitized.replace(/\bhttps?:\/\/[^\s)\]]*\/(?:api|mcp)[^\s)\]]*/gi, "Web checked");
+  return sanitized;
+}
+
+function shouldReplaceWithMarketLineFallback(text: string): boolean {
+  const sentenceLevelClaims = [
+    /\bmoneyline\b[^.\n]*[+-]\d{2,4}/i,
+    /\bspread\b[^.\n]*[+-]?\d+(?:\.\d+)?/i,
+    /\b(total|over|under)\b[^.\n]*\d+(?:\.\d+)?/i,
+    /\bodds?\b[^.\n]*[+-]\d{2,4}/i,
+    /\bbookmaker\b/i,
+  ];
+  return sentenceLevelClaims.some((pattern) => pattern.test(text));
 }
 
 function sanitizeAllowedOutput(text: string, allowPartial: boolean): string {
   if (!text) return "";
-  const sanitized = stripInternalModelTerms(text);
-  if (!allowPartial) return sanitized;
-  return sanitizeScoreOnlyOutput(sanitized);
+  let sanitized = stripInternalModelTerms(text);
+  sanitized = stripRawDebugUrls(sanitized);
+  sanitized = sanitized.replace(/\s{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  if (allowPartial && shouldReplaceWithMarketLineFallback(sanitized)) {
+    return "ESPN checked. Market line not found yet.";
+  }
+  return sanitized;
+}
+
+function formatFooterTimestamp(isoTimestamp?: string): string {
+  if (!isoTimestamp) return "";
+  const parsed = Date.parse(isoTimestamp);
+  if (Number.isNaN(parsed)) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function buildSourceFooter(options: {
+  espnChecked?: boolean;
+  webChecked?: boolean;
+  fetchedAt?: string;
+}): string {
+  const parts: string[] = [];
+  if (options.espnChecked) parts.push("ESPN checked");
+  if (options.webChecked) parts.push("Web checked");
+  const timestamp = formatFooterTimestamp(options.fetchedAt || new Date().toISOString());
+  if (timestamp) parts.push(timestamp);
+  return parts.join(" · ");
 }
 
 function buildScoreStateEvidenceMessage(board: BoardEvent[]): string {
   const fresh = board.find((entry) => isSourceFresh(entry.source_evidence[0]));
   if (!fresh) return "";
   const source = fresh.source_evidence[0];
-  return `ESPN checked • ${source.source_url} • ${new Date(source.fetched_at).toLocaleString()}`;
+  return buildSourceFooter({ espnChecked: true, fetchedAt: source.fetched_at });
 }
 
 function isScreenshotOnlyInputLike(message: string, hasGroundingContext: boolean): boolean {
@@ -316,7 +330,196 @@ function normalizeGameText(message: string): string {
 }
 
 function isGeneralSlateQuery(message: string): boolean {
-  return /\b(slate|board|today|tomorrow|yesterday|games?\s+today|all games|who.?s on|schedule)\b/i.test(message);
+  return /\b(slate|board|today|tomorrow|tonight|yesterday|games?\s+today|games?\s+tomorrow|all games|who.?s on|schedule|any live games|what happened today)\b/i.test(message);
+}
+
+function detectCapabilityIntent(message: string): boolean {
+  return /\b(what can you do|what do you do|how does this work|features|modes|help|explain baseline|what are you)\b/i.test(message);
+}
+
+function detectPitcherIntent(message: string): boolean {
+  return /\b(pitcher|pitchers|probable pitcher|probable pitchers|starter|starters|mound|ace|arm|best pitcher)\b/i.test(message);
+}
+
+function detectSlateIntent(message: string): boolean {
+  return /\b(what games are tomorrow|who plays tonight|what.?s on the slate|any live games|what happened today|games tomorrow|games today|today.?s slate|tomorrow.?s slate)\b/i.test(message);
+}
+
+function inferSlateSegment(message: string): "all" | "live" | "final" {
+  if (/\b(any live games|live games|live now|in progress)\b/i.test(message)) return "live";
+  if (/\b(what happened today|finals?|results?)\b/i.test(message)) return "final";
+  return "all";
+}
+
+type DateIntent = {
+  date: Date;
+  relativeLabel: "today" | "tomorrow" | "tonight" | "yesterday" | "date";
+  prettyLabel: string;
+};
+
+function startOfDay(date: Date): Date {
+  const out = new Date(date);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function addDays(date: Date, days: number): Date {
+  const out = new Date(date);
+  out.setDate(out.getDate() + days);
+  return out;
+}
+
+function toEspnDateParam(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
+function toPrettyDateLabel(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function parseDateFromMessage(message: string, now = new Date()): DateIntent {
+  const lowered = message.toLowerCase();
+  const today = startOfDay(now);
+
+  if (/\btomorrow\b/.test(lowered)) {
+    const date = addDays(today, 1);
+    return { date, relativeLabel: "tomorrow", prettyLabel: toPrettyDateLabel(date) };
+  }
+  if (/\byesterday\b/.test(lowered)) {
+    const date = addDays(today, -1);
+    return { date, relativeLabel: "yesterday", prettyLabel: toPrettyDateLabel(date) };
+  }
+  if (/\btonight\b/.test(lowered)) {
+    return { date: today, relativeLabel: "tonight", prettyLabel: toPrettyDateLabel(today) };
+  }
+  if (/\btoday\b/.test(lowered)) {
+    return { date: today, relativeLabel: "today", prettyLabel: toPrettyDateLabel(today) };
+  }
+
+  const iso = message.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+  if (iso) {
+    const parsed = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    if (!Number.isNaN(parsed.getTime())) {
+      return { date: startOfDay(parsed), relativeLabel: "date", prettyLabel: toPrettyDateLabel(parsed) };
+    }
+  }
+
+  const usDate = message.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}|\d{2}))?\b/);
+  if (usDate) {
+    const yearRaw = usDate[3];
+    const year = yearRaw
+      ? Number(yearRaw.length === 2 ? `20${yearRaw}` : yearRaw)
+      : today.getFullYear();
+    const parsed = new Date(year, Number(usDate[1]) - 1, Number(usDate[2]));
+    if (!Number.isNaN(parsed.getTime())) {
+      return { date: startOfDay(parsed), relativeLabel: "date", prettyLabel: toPrettyDateLabel(parsed) };
+    }
+  }
+
+  return { date: today, relativeLabel: "today", prettyLabel: toPrettyDateLabel(today) };
+}
+
+type StarterEntry = {
+  game: BoardEvent;
+  side: "home" | "away";
+  pitcher: string;
+  record?: string;
+  team: string;
+};
+
+function extractEra(record?: string): number | null {
+  if (!record) return null;
+  const match = record.match(/(\d+\.\d+)\s*ERA/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function collectListedStarters(board: BoardEvent[]): StarterEntry[] {
+  const starters: StarterEntry[] = [];
+  for (const game of board) {
+    if (game.home_pitcher) {
+      starters.push({
+        game,
+        side: "home",
+        pitcher: game.home_pitcher,
+        record: game.home_pitcher_record,
+        team: game.home_team,
+      });
+    }
+    if (game.away_pitcher) {
+      starters.push({
+        game,
+        side: "away",
+        pitcher: game.away_pitcher,
+        record: game.away_pitcher_record,
+        team: game.away_team,
+      });
+    }
+  }
+  return starters;
+}
+
+function rankStarters(starters: StarterEntry[]): StarterEntry[] {
+  return [...starters].sort((a, b) => {
+    const aEra = extractEra(a.record);
+    const bEra = extractEra(b.record);
+    if (aEra !== null && bEra !== null) return aEra - bEra;
+    if (aEra !== null) return -1;
+    if (bEra !== null) return 1;
+    return a.pitcher.localeCompare(b.pitcher);
+  });
+}
+
+function buildPitcherAnswerFromSlate(starters: StarterEntry[], dateIntent: DateIntent): string {
+  if (starters.length === 0) {
+    return "ESPN checked the slate. Probables are not posted yet.";
+  }
+  const ranked = rankStarters(starters);
+  const top = ranked[0];
+  const shortlist = ranked
+    .slice(0, 6)
+    .map((starter) => `${starter.pitcher} (${starter.team}${starter.record ? `, ${starter.record}` : ""})`)
+    .join("; ");
+  return [
+    `ESPN checked ${dateIntent.relativeLabel === "date" ? dateIntent.prettyLabel : `the ${dateIntent.relativeLabel}`} slate.`,
+    `Best listed starter: ${top.pitcher} (${top.team}${top.record ? `, ${top.record}` : ""}).`,
+    "Based on listed probables only, not advanced form metrics.",
+    shortlist ? `Top listed probables: ${shortlist}.` : "",
+  ].filter(Boolean).join(" ");
+}
+
+function buildSlateAnswerFromBoard(board: BoardEvent[], message: string, dateIntent: DateIntent): string {
+  const segment = inferSlateSegment(message);
+  const filtered = segment === "live"
+    ? board.filter((game) => game.status === "live")
+    : segment === "final"
+      ? board.filter((game) => game.status === "final")
+      : board;
+
+  if (filtered.length === 0) {
+    if (segment === "live") {
+      return `ESPN checked. No live games are listed for ${dateIntent.relativeLabel === "date" ? dateIntent.prettyLabel : dateIntent.relativeLabel} right now.`;
+    }
+    return `ESPN checked. No games are listed for ${dateIntent.relativeLabel === "date" ? dateIntent.prettyLabel : dateIntent.relativeLabel} yet.`;
+  }
+
+  const lines = filtered.slice(0, 12).map((game) => {
+    const statusLabel = game.status === "live"
+      ? game.score || "Live"
+      : game.status === "final"
+        ? game.score || "Final"
+        : new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(game.date));
+    return `${game.away_team} at ${game.home_team} (${statusLabel})`;
+  });
+  return `ESPN checked ${dateIntent.relativeLabel === "date" ? dateIntent.prettyLabel : dateIntent.relativeLabel} slate: ${lines.join("; ")}.`;
 }
 
 function selectEspnGameForMessage(message: string, board: BoardEvent[]): MatchedSelection | null {
@@ -384,7 +587,7 @@ function buildScoreState(event: NormalizedEspnScoreboardEvent): MarketDataStatus
     return {
       state: "partial",
       code: "ODDS_UNAVAILABLE_BUT_GAME_GROUNDED",
-      message: "ESPN checked. Market odds not found yet.",
+      message: "ESPN checked. Market line not found yet.",
       allowed_output: "score/state/simple pace only",
     };
   }
@@ -433,13 +636,13 @@ function getSystemInstruction(
 ): string {
   const evidence = sportsSourceEvidence[0];
   const evidenceLine = evidence
-    ? `ESPN checked source: ${evidence.source_url} (${evidence.freshness_status})`
+    ? `ESPN checked source freshness: ${evidence.freshness_status} at ${evidence.fetched_at}`
     : "ESPN checked source: not available";
   const allowedMarketLine = selectedGame?.market_data_status?.state === "partial"
-    ? "Allowed output for this request is score/state/simple pace only."
+    ? "If this game has no listed line, say: ESPN checked. Market line not found yet."
     : "Market context may include moneyline/spread/total only when attached from ESPN.";
   const boardLine = boardForContext
-    .slice(0, requestScope === "game_level" ? 1 : boardForContext.length)
+    .slice(0, requestScope === "game_level" ? Math.min(6, boardForContext.length) : boardForContext.length)
     .map((entry) => ({
       event_id: entry.event_id,
       home_team: entry.home_team,
@@ -447,7 +650,10 @@ function getSystemInstruction(
       status: entry.status,
       market_state: entry.market_data_status.state,
       fetched_at: entry.fetched_at,
-      source_url: entry.source_url,
+      home_pitcher: entry.home_pitcher,
+      away_pitcher: entry.away_pitcher,
+      home_pitcher_record: entry.home_pitcher_record,
+      away_pitcher_record: entry.away_pitcher_record,
     }));
 
   const selected = selectedGame
@@ -460,23 +666,28 @@ function getSystemInstruction(
       status: selectedGame.status,
       inning: selectedGame.inning,
       inning_half: selectedGame.inning_half,
-      source_url: selectedGame.source_url,
       fetched_at: selectedGame.fetched_at,
       market_data_status: selectedGame.market_data_status,
+      home_pitcher: selectedGame.home_pitcher,
+      away_pitcher: selectedGame.away_pitcher,
+      home_pitcher_record: selectedGame.home_pitcher_record,
+      away_pitcher_record: selectedGame.away_pitcher_record,
     }
     : null;
 
   return `
 You are Baseline, an institutional sports assistant.
 Hard policy:
-1. ESPN checked context is authoritative and wins over local board state, screenshots, chat history, and memory.
-2. For game-level requests, you must match the question to a single ESPN game using team names, event id, or ESPN ids before answering.
-3. Local board data is not authoritative unless each object has source_url and fetched_at.
-4. If market odds are missing, answer only score/state/simple pace and do not claim market movement or edge.
-5. Do not expose internal governance terms (payload, grounding, synthetic odds, rpc, stack trace, raw source failures).
-6. PASS is a betting-decision term only; do not use it as a data-unavailable state.
-7. If a specific game is not confidently identified, return a refusal asking for clearer details.
-8. Use this exact phrase in surface-facing updates: "ESPN checked."
+1. ESPN checked context anchors game facts.
+2. Grounded web search expands missing context for pitcher/stat/injury/preview/slate questions.
+3. Missing secondary context is not a refusal condition.
+4. Never invent odds, bookmaker names, or line movement.
+5. If a game is grounded but line data is missing, say: "ESPN checked. Market line not found yet."
+6. If probables are missing after search, say: "ESPN checked the slate. Probables are not posted yet."
+7. Never claim you lack access to future schedules if ESPN slate lookup/search can be used.
+8. Never print raw API endpoint URLs in user-facing answer text.
+9. Do not expose internal terms (payload, grounding, synthetic odds, rpc, stack trace, source failure).
+10. PASS is a betting decision term only, never a data-unavailable state.
 
 User request scope: ${requestScope}
 Requested mode: ${mode || "auto"}
@@ -520,6 +731,17 @@ function mapModelResponseText(response: unknown): string {
       .join(" ");
   }
   return "";
+}
+
+function looksLikeOverconstrainedRefusal(text: string): boolean {
+  const blockedPhrases = [
+    "i do not have access to future schedules",
+    "i cannot determine from available game-level information",
+    "the provided context does not include",
+    "please specify which game",
+  ];
+  const lowered = text.toLowerCase();
+  return blockedPhrases.some((phrase) => lowered.includes(phrase));
 }
 
 async function requestAiResponse(
@@ -571,6 +793,7 @@ async function requestAiResponse(
         contents: messages,
         config: {
           systemInstruction,
+          tools: [{ googleSearch: {} }],
           temperature: 0.1,
         },
       });
@@ -610,9 +833,12 @@ function failPayload(
   return res.status(422).json({ error: failure.message, failure_state: failure });
 }
 
-async function fetchEspnBoard(): Promise<{ board: BoardEvent[]; evidence: SourceEvidence[]; fetchedAt: string }> {
+async function fetchEspnBoard(targetDate?: Date): Promise<{ board: BoardEvent[]; evidence: SourceEvidence[]; fetchedAt: string }> {
   const fetchedAt = new Date().toISOString();
-  const response = await axios.get(ESPN_SCOREBOARD_URL, { timeout: 10_000 });
+  const response = await axios.get(ESPN_SCOREBOARD_URL, {
+    timeout: 10_000,
+    params: targetDate ? { dates: toEspnDateParam(targetDate) } : undefined,
+  });
   const events = Array.isArray(response.data?.events) ? response.data.events : [];
   const board = events
     .map((event) => buildBoardEvent(event, fetchedAt))
@@ -667,7 +893,7 @@ function buildPayloadForGame(
 function normalizeMarketEvidenceText(board: BoardEvent[]): string {
   const primary = board[0];
   if (!primary) return "";
-  const at = primary.market_data_status.state === "partial" ? "ESPN checked. Market odds not found yet." : "";
+  const at = primary.market_data_status.state === "partial" ? "ESPN checked. Market line not found yet." : "";
   return at ? `${at} ` : "";
 }
 
@@ -878,58 +1104,50 @@ async function startServer() {
 
         if (isGameLevelRequest) {
           const selection = selectEspnGameForMessage(message, board);
-          if (!selection) {
-            return failPayload(
-              res,
-              "ESPN_GROUNDING_REQUIRED",
-              "I could not map your request to an ESPN game in the current board.",
-              sportsSourceEvidence
-            );
-          }
+          if (selection && selection.isSpecific) {
+            selectedGame = selection.game;
+            if (!validateRequiredEspnGroundingFields(selectedGame)) {
+              return failPayload(
+                res,
+                "ESPN_GROUNDING_INVALID",
+                "ESPN grounding could not be validated for that game.",
+                sportsSourceEvidence
+              );
+            }
 
-          if (!selection.isSpecific) {
-            return failPayload(
-              res,
-              "UNKNOWN_SPORTS_ROUTE",
-              "I found a slate match but not a specific game. Include both teams or the event id.",
-              sportsSourceEvidence
-            );
-          }
+            if (!isGroundingFresh(selectedGame, Date.now())) {
+              return failPayload(
+                res,
+                "ESPN_SOURCE_STALE",
+                "ESPN grounding is stale. Please retry after refresh.",
+                sportsSourceEvidence
+              );
+            }
 
-          selectedGame = selection.game;
-          if (!validateRequiredEspnGroundingFields(selectedGame)) {
-            return failPayload(
-              res,
-              "ESPN_GROUNDING_INVALID",
-              "ESPN grounding could not be validated for that game.",
-              sportsSourceEvidence
-            );
-          }
+            const localEvidence = collectLocalEvidence(oddsData);
+            if (localEvidence.length) {
+              sportsSourceEvidence.push(...localEvidence);
+            }
+            if (selectedGame.market_data_status.state === "failed") {
+              return failPayload(
+                res,
+                "ESPN_SOURCE_FAILURE",
+                "ESPN grounding has failed. Cannot produce market-anchored answer.",
+                sportsSourceEvidence
+              );
+            }
 
-          if (!isGroundingFresh(selectedGame, Date.now())) {
-            return failPayload(
-              res,
-              "ESPN_SOURCE_STALE",
-              "ESPN grounding is stale. Please retry after refresh.",
-              sportsSourceEvidence
+            const payloadCheck = buildPayloadForGame(message, selectedGame, sportsSourceEvidence);
+            payloadContract = payloadCheck;
+          } else {
+            auditLog.push(
+              buildAuditEvent("game_scope_fallback_to_grounded_search", "allow", {
+                reason: selection ? "ambiguous_game_match" : "no_specific_game_match",
+              })
             );
+            const payloadCheck = buildPayloadForGeneral(message, sportsSourceEvidence);
+            payloadContract = payloadCheck as unknown as PayloadContract;
           }
-
-          const localEvidence = collectLocalEvidence(oddsData);
-          if (localEvidence.length) {
-            sportsSourceEvidence.push(...localEvidence);
-          }
-          if (selectedGame.market_data_status.state === "failed") {
-            return failPayload(
-              res,
-              "ESPN_SOURCE_FAILURE",
-              "ESPN grounding has failed. Cannot produce market-anchored answer.",
-              sportsSourceEvidence
-            );
-          }
-
-          const payloadCheck = buildPayloadForGame(message, selectedGame, sportsSourceEvidence);
-          payloadContract = payloadCheck;
         } else {
           const payloadCheck = buildPayloadForGeneral(message, sportsSourceEvidence);
           payloadContract = payloadCheck as unknown as PayloadContract;
