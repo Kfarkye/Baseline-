@@ -295,6 +295,7 @@ function buildSourceFooter(options: {
   const parts: string[] = [];
   if (options.espnChecked) parts.push("ESPN checked");
   if (options.webChecked) parts.push("Web checked");
+  if (parts.length === 0) return "";
   const timestamp = formatFooterTimestamp(options.fetchedAt || new Date().toISOString());
   if (timestamp) parts.push(timestamp);
   return parts.join(" · ");
@@ -520,6 +521,10 @@ function buildSlateAnswerFromBoard(board: BoardEvent[], message: string, dateInt
     return `${game.away_team} at ${game.home_team} (${statusLabel})`;
   });
   return `ESPN checked ${dateIntent.relativeLabel === "date" ? dateIntent.prettyLabel : dateIntent.relativeLabel} slate: ${lines.join("; ")}.`;
+}
+
+function buildCapabilityAnswer(): string {
+  return "I can check live games, upcoming slates, final scores, probable pitchers, matchup context, and market lines when a source has them. ESPN is checked first for game facts. If a secondary layer like probables or market lines is not posted yet, I'll say that plainly instead of making it up.";
 }
 
 function selectEspnGameForMessage(message: string, board: BoardEvent[]): MatchedSelection | null {
@@ -1037,21 +1042,30 @@ async function startServer() {
       text: entry.text,
     }));
 
+      const capabilityIntent = detectCapabilityIntent(message);
+      const pitcherIntent = detectPitcherIntent(message);
+      const slateIntent = detectSlateIntent(message);
+      const dateIntent = parseDateFromMessage(message);
+
       const isGameLevelRequest = isGameLevelSportsRequest(message);
+      const effectiveGameLevelRequest = !capabilityIntent && !pitcherIntent && !slateIntent && isGameLevelRequest;
       const hasLocalSlateContext = Array.isArray(oddsData) && oddsData.length > 0;
       const hasScreenshotSourceHint = Array.isArray(input_sources) && input_sources.includes("screenshot");
       const isScreenshotOnly = isScreenshotOnlyInputLike(message, hasLocalSlateContext || hasScreenshotSourceHint);
-      const shouldRefreshEsnp = isGameLevelRequest || isGeneralSlateQuery(message);
+      const shouldRefreshEsnp = effectiveGameLevelRequest || isGeneralSlateQuery(message) || capabilityIntent || pitcherIntent || slateIntent;
 
       let board: BoardEvent[] = [];
       let sportsSourceEvidence: SourceEvidence[] = [];
       let selectedGame: BoardEvent | null = null;
       let payloadContract: PayloadContract | null = null;
+      let finalTextFromIntent: string | null = null;
+      let fallbackIfRefusal: string | null = null;
+      let forceWebCheckedFooter = false;
 
       if (shouldRefreshEsnp) {
         let espnFetch: { board: BoardEvent[]; evidence: SourceEvidence[]; fetchedAt: string };
         try {
-          espnFetch = await fetchEspnBoard();
+          espnFetch = await fetchEspnBoard(pitcherIntent || slateIntent ? dateIntent.date : undefined);
           board = espnFetch.board;
           sportsSourceEvidence = espnFetch.evidence;
           const primaryEvidence = buildSourceEvidence(
@@ -1067,120 +1081,175 @@ async function startServer() {
             })
           );
         } catch (error: unknown) {
-          if (isScreenshotOnly) {
+          if (capabilityIntent) {
+            finalTextFromIntent = buildCapabilityAnswer();
+            payloadContract = buildPayloadForGeneral(
+              message,
+              [buildSourceEvidence(ESPN_SCOREBOARD_HOME, "espn", new Date().toISOString())]
+            );
+            auditLog.push(buildAuditEvent("capability_intent_without_refresh", "allow"));
+            board = [];
+            sportsSourceEvidence = [];
+            // Capability answer does not require a game-level ESPN refresh.
+          } else if (isScreenshotOnly) {
             return failPayload(
               res,
               "SCREENSHOT_ONLY_INPUT_BLOCKED",
               "I can only answer screenshot-based game requests after ESPN grounding succeeds in-session.",
               sportsSourceEvidence
             );
-          }
-          return failPayload(
-            res,
-            "ESPN_SOURCE_FAILURE",
-            "Could not refresh ESPN grounding for this request. Please retry in a moment.",
-            sportsSourceEvidence
-          );
-        }
-
-        if (board.length === 0 && isGameLevelRequest) {
-          return failPayload(
-            res,
-            "ESPN_GROUNDING_REQUIRED",
-            "ESPN returned no active slate at this time.",
-            sportsSourceEvidence
-          );
-        }
-
-        const stale = sportsSourceEvidence.find((entry) => isSourceStale(entry));
-        if (isGameLevelRequest && stale) {
-          return failPayload(
-            res,
-            "ESPN_SOURCE_STALE",
-            "ESPN grounding is stale. Refreshing again may be needed before answering.",
-            sportsSourceEvidence
-          );
-        }
-
-        if (isGameLevelRequest) {
-          const selection = selectEspnGameForMessage(message, board);
-          if (selection && selection.isSpecific) {
-            selectedGame = selection.game;
-            if (!validateRequiredEspnGroundingFields(selectedGame)) {
-              return failPayload(
-                res,
-                "ESPN_GROUNDING_INVALID",
-                "ESPN grounding could not be validated for that game.",
-                sportsSourceEvidence
-              );
-            }
-
-            if (!isGroundingFresh(selectedGame, Date.now())) {
-              return failPayload(
-                res,
-                "ESPN_SOURCE_STALE",
-                "ESPN grounding is stale. Please retry after refresh.",
-                sportsSourceEvidence
-              );
-            }
-
-            const localEvidence = collectLocalEvidence(oddsData);
-            if (localEvidence.length) {
-              sportsSourceEvidence.push(...localEvidence);
-            }
-            if (selectedGame.market_data_status.state === "failed") {
-              return failPayload(
-                res,
-                "ESPN_SOURCE_FAILURE",
-                "ESPN grounding has failed. Cannot produce market-anchored answer.",
-                sportsSourceEvidence
-              );
-            }
-
-            const payloadCheck = buildPayloadForGame(message, selectedGame, sportsSourceEvidence);
-            payloadContract = payloadCheck;
           } else {
-            auditLog.push(
-              buildAuditEvent("game_scope_fallback_to_grounded_search", "allow", {
-                reason: selection ? "ambiguous_game_match" : "no_specific_game_match",
-              })
+            return failPayload(
+              res,
+              "ESPN_SOURCE_FAILURE",
+              "Could not refresh ESPN grounding for this request. Please retry in a moment.",
+              sportsSourceEvidence
             );
+          }
+        }
+
+        if (finalTextFromIntent && capabilityIntent && board.length === 0) {
+          // Skip further board-dependent checks when capability response is already prepared.
+        } else {
+          if (board.length === 0 && effectiveGameLevelRequest) {
+            return failPayload(
+              res,
+              "ESPN_GROUNDING_REQUIRED",
+              "ESPN returned no active slate at this time.",
+              sportsSourceEvidence
+            );
+          }
+
+          const stale = sportsSourceEvidence.find((entry) => isSourceStale(entry));
+          if (effectiveGameLevelRequest && stale) {
+            return failPayload(
+              res,
+              "ESPN_SOURCE_STALE",
+              "ESPN grounding is stale. Refreshing again may be needed before answering.",
+              sportsSourceEvidence
+            );
+          }
+
+          if (capabilityIntent) {
+            finalTextFromIntent = buildCapabilityAnswer();
+            payloadContract = buildPayloadForGeneral(message, sportsSourceEvidence);
+            auditLog.push(buildAuditEvent("capability_intent", "allow"));
+          } else if (pitcherIntent) {
+            const starters = collectListedStarters(board);
+            if (starters.length > 0) {
+              finalTextFromIntent = buildPitcherAnswerFromSlate(starters, dateIntent);
+              payloadContract = buildPayloadForGeneral(message, sportsSourceEvidence);
+              auditLog.push(buildAuditEvent("pitcher_intent_listed_probables", "allow", { starters: String(starters.length) }));
+            } else {
+              fallbackIfRefusal = "ESPN checked the slate. Probables are not posted yet.";
+              forceWebCheckedFooter = true;
+              auditLog.push(buildAuditEvent("pitcher_intent_expand_search", "allow"));
+            }
+          } else if (slateIntent) {
+            finalTextFromIntent = buildSlateAnswerFromBoard(board, message, dateIntent);
+            payloadContract = buildPayloadForGeneral(message, sportsSourceEvidence);
+            auditLog.push(buildAuditEvent("slate_intent", "allow", { events: String(board.length) }));
+          } else if (effectiveGameLevelRequest) {
+            const selection = selectEspnGameForMessage(message, board);
+            if (selection && selection.isSpecific) {
+              selectedGame = selection.game;
+              if (!validateRequiredEspnGroundingFields(selectedGame)) {
+                return failPayload(
+                  res,
+                  "ESPN_GROUNDING_INVALID",
+                  "ESPN grounding could not be validated for that game.",
+                  sportsSourceEvidence
+                );
+              }
+
+              if (!isGroundingFresh(selectedGame, Date.now())) {
+                return failPayload(
+                  res,
+                  "ESPN_SOURCE_STALE",
+                  "ESPN grounding is stale. Please retry after refresh.",
+                  sportsSourceEvidence
+                );
+              }
+
+              const localEvidence = collectLocalEvidence(oddsData);
+              if (localEvidence.length) {
+                sportsSourceEvidence.push(...localEvidence);
+              }
+              if (selectedGame.market_data_status.state === "failed") {
+                return failPayload(
+                  res,
+                  "ESPN_SOURCE_FAILURE",
+                  "ESPN grounding has failed. Cannot produce market-anchored answer.",
+                  sportsSourceEvidence
+                );
+              }
+
+              const payloadCheck = buildPayloadForGame(message, selectedGame, sportsSourceEvidence);
+              payloadContract = payloadCheck;
+            } else {
+              auditLog.push(
+                buildAuditEvent("game_scope_fallback_to_grounded_search", "allow", {
+                  reason: selection ? "ambiguous_game_match" : "no_specific_game_match",
+                })
+              );
+              const payloadCheck = buildPayloadForGeneral(message, sportsSourceEvidence);
+              payloadContract = payloadCheck as unknown as PayloadContract;
+            }
+          } else {
             const payloadCheck = buildPayloadForGeneral(message, sportsSourceEvidence);
             payloadContract = payloadCheck as unknown as PayloadContract;
           }
-        } else {
-          const payloadCheck = buildPayloadForGeneral(message, sportsSourceEvidence);
-          payloadContract = payloadCheck as unknown as PayloadContract;
         }
       } else {
         const localEvidence = collectLocalEvidence(oddsData);
         if (localEvidence.length) sportsSourceEvidence.push(...localEvidence);
       }
 
-      const requestedModel = process.env.GEMINI_MODEL || DEFAULT_CHAT_MODEL;
-      const candidates = getChatModelCandidates(requestedModel);
       const allowPartial = !!selectedGame && selectedGame.market_data_status.state === "partial";
+      let finalText = finalTextFromIntent || "";
+      let aiUsed = false;
 
-      const responseText = await requestAiResponse(candidates, {
-        message,
-        history: normalizedHistory,
-        boardForContext: board,
-        sportsSourceEvidence: sportsSourceEvidence,
-        selectedGame,
-        scope: isGameLevelRequest ? "game_level" : "general",
-        mode,
-        allowPartial,
+      if (!finalText) {
+        const requestedModel = process.env.GEMINI_MODEL || DEFAULT_CHAT_MODEL;
+        const candidates = getChatModelCandidates(requestedModel);
+        const responseText = await requestAiResponse(candidates, {
+          message,
+          history: normalizedHistory,
+          boardForContext: board,
+          sportsSourceEvidence: sportsSourceEvidence,
+          selectedGame,
+          scope: effectiveGameLevelRequest ? "game_level" : "general",
+          mode,
+          allowPartial,
+        });
+        finalText = responseText ? `${responseText}` : "No publishable answer is available right now.";
+        aiUsed = true;
+      }
+
+      if (!finalText) {
+        finalText = "No publishable answer is available right now.";
+      }
+
+      if (looksLikeOverconstrainedRefusal(finalText)) {
+        if (fallbackIfRefusal) {
+          finalText = fallbackIfRefusal;
+        } else if (pitcherIntent) {
+          finalText = "ESPN checked the slate. Probables are not posted yet.";
+        } else if (slateIntent || isGeneralSlateQuery(message)) {
+          finalText = buildSlateAnswerFromBoard(board, message, dateIntent);
+        }
+      }
+
+      if (allowPartial && shouldReplaceWithMarketLineFallback(finalText)) {
+        finalText = "ESPN checked. Market line not found yet.";
+      }
+
+      const evidenceLine = buildSourceFooter({
+        espnChecked: board.length > 0 || sportsSourceEvidence.some((entry) => entry.source_type === "espn"),
+        webChecked: forceWebCheckedFooter || (aiUsed && (pitcherIntent || slateIntent)),
+        fetchedAt: sportsSourceEvidence[0]?.fetched_at,
       });
-
-      const evidenceLine = buildScoreStateEvidenceMessage(board);
-      let finalText = responseText ? `${responseText}` : "No publishable answer is available right now.";
-
-      if (allowPartial && !isScoreOnlyOutputContext(finalText)) {
-        finalText = sanitizeScoreOnlyOutput(finalText);
-      }
-      if (evidenceLine) {
-        finalText = `${finalText}\n\n${evidenceLine}`.trim();
-      }
+      if (evidenceLine) finalText = `${finalText}\n\n${evidenceLine}`.trim();
 
       if (isAllowedPassOutput(finalText) || /PASS\s*-\s*data unavailable/i.test(finalText)) {
         return failPayload(

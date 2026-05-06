@@ -28,7 +28,6 @@ In your architecture, the `deploy.yml` references environment variables safely m
 
 Create these secrets in **Google Cloud Secret Manager** inside the `gen-lang-client-0281999829` project:
 - `stripe_secret_key`
-- `odds_api_key`
 - `firebase_service_account`
 - `gemini_api_key`
 

@@ -29,6 +29,12 @@ export interface NormalizedEspnScoreboardEvent {
   venue?: string;
   inning?: number | string;
   inning_half?: string;
+  home_pitcher?: string;
+  away_pitcher?: string;
+  home_pitcher_headshot?: string;
+  away_pitcher_headshot?: string;
+  home_pitcher_record?: string;
+  away_pitcher_record?: string;
   source_url: string;
   fetched_at: string;
   bookmakers: EspnNormalizedBookmaker[];
@@ -38,6 +44,21 @@ export interface NormalizedEspnScoreboardEvent {
     message?: string;
     allowed_output?: string;
   };
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function pickHeadshotUrl(raw: unknown): string | undefined {
+  if (typeof raw === "string") return normalizeOptionalString(raw);
+  if (raw && typeof raw === "object") {
+    const href = (raw as { href?: unknown }).href;
+    if (typeof href === "string") return normalizeOptionalString(href);
+  }
+  return undefined;
 }
 
 export interface EspnGameGrounding {
@@ -226,6 +247,15 @@ export function normalizeEspnScoreboardEvent(event: any, nowIso: string): Normal
     ? `${awayTeamName || "Away"} ${awayScore || "0"} - ${homeTeamName || "Home"} ${homeScore || "0"}`
     : undefined;
 
+  const homeProbable = Array.isArray(home?.probables) ? home.probables[0] : undefined;
+  const awayProbable = Array.isArray(away?.probables) ? away.probables[0] : undefined;
+  const homePitcher = normalizeOptionalString(homeProbable?.athlete?.displayName ?? homeProbable?.displayName);
+  const awayPitcher = normalizeOptionalString(awayProbable?.athlete?.displayName ?? awayProbable?.displayName);
+  const homePitcherHeadshot = pickHeadshotUrl(homeProbable?.athlete?.headshot);
+  const awayPitcherHeadshot = pickHeadshotUrl(awayProbable?.athlete?.headshot);
+  const homePitcherRecord = normalizeOptionalString(homeProbable?.summary ?? homeProbable?.statistics?.[0]?.displayValue);
+  const awayPitcherRecord = normalizeOptionalString(awayProbable?.summary ?? awayProbable?.statistics?.[0]?.displayValue);
+
   const bookmakers = parseOddsFromEspnCompetition(competition);
   const grounding: EspnGameGrounding = {
     event_id: eventId,
@@ -255,15 +285,21 @@ export function normalizeEspnScoreboardEvent(event: any, nowIso: string): Normal
     venue: normalizeName(competition?.venue?.fullName),
     inning: status === "live" ? inning : undefined,
     inning_half: inningHalf,
+    home_pitcher: homePitcher,
+    away_pitcher: awayPitcher,
+    home_pitcher_headshot: homePitcherHeadshot,
+    away_pitcher_headshot: awayPitcherHeadshot,
+    home_pitcher_record: homePitcherRecord,
+    away_pitcher_record: awayPitcherRecord,
     source_url: buildEspnSourceUrl(eventId),
     fetched_at: nowIso,
     bookmakers,
     market_data_status: bookmakers.length > 0
       ? { state: "grounded" }
-      : {
+        : {
           state: "partial",
           code: "ODDS_UNAVAILABLE_BUT_GAME_GROUNDED",
-          message: "ESPN checked. Market odds not found yet.",
+          message: "ESPN checked. Market line not found yet.",
           allowed_output: "score/state/simple pace only",
         },
     ...(

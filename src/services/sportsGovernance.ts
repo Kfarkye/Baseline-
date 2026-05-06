@@ -96,7 +96,6 @@ export const CanonicalPublicUrlSchema = z.string().url().refine(isPublicNonInter
 
 export const SourceTypeSchema = z.enum([
   "espn",
-  "odds_api",
   "local_slate",
   "screenshot",
   "user_prompt",

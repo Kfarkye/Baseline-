@@ -72,11 +72,7 @@ assert.equal(
   "Expected PASS data-unavailable phrase to be recognized as blocked"
 );
 
-// 7. score-only contexts should not include market phrases
-const scoreOnlyText = "ESPN checked. score/state/simple pace only.";
-assert.ok(!/\b(moneyline|spread|total|odds|over|under)\b/i.test(scoreOnlyText), "Expected score-only output to avoid market phrases");
-
-// 8. SportOdds includes required source and freshness fields
+// 7. SportOdds includes required source and freshness fields
 const oddsServiceText = readText("src/services/oddsService.ts");
 expectContainsRegex(
   oddsServiceText,
@@ -94,21 +90,56 @@ expectContainsRegex(
   "SportOdds must include market_data_status?: MarketDataStatus"
 );
 
-// 9. server.ts should not reference old synthetic source identifiers
+// 8. server.ts should not reference competitor API or synthetic odds branches
 const serverText = readText("server.ts");
 assert.ok(!/synthetic_odds/i.test(serverText), "server.ts must not reference synthetic odds keys");
 assert.ok(!/api\\.the-odds-api\\.com/i.test(serverText), "server.ts must not call The Odds API endpoint");
 assert.ok(!/\\bODDS_API_KEY\\b/.test(serverText), "server.ts must not branch on ODDS_API_KEY");
 
-// 12. no fake DraftKings fallback in server
+// 9. no fake DraftKings fallback in server
 assert.ok(!/draft\\s*kings/i.test(serverText), "server.ts must not include DraftKings fallback language");
 
-// 13. App.tsx should not copy The Odds API text to users
+// 10. App.tsx should not copy competitor copy or internal terms to users
 const appText = readText("src/App.tsx");
 assert.ok(!/The\\s+Odds\\s+API/i.test(appText), "App.tsx must not surface The Odds API wording");
 assert.ok(!/`[^`]*\\b(grounding|payload|governance|raw\\s*r\\w*pc|source\\s*failure|stack\\s*trace|synthetic\\s*odds)\\b[^`]*`/i.test(appText), "App.tsx must not expose internal governance wording in template text");
 assert.ok(!/\"[^\"\\n]*\\b(grounding|payload|governance|stack\\s*trace|synthetic\\s*odds|source\\s*failure)\\b[^\"\\n]*\"/i.test(appText), "App.tsx must not expose internal governance wording in template text");
 assert.ok(!/'[^'\\n]*\\b(grounding|payload|governance|stack\\s*trace|synthetic\\s*odds|source\\s*failure)\\b[^'\\n]*'/i.test(appText), "App.tsx must not expose internal governance wording in template text");
+
+// 11. sanitizer must not globally delete market words
+const forbiddenGlobalDeletions = [
+  /\.replace\(\s*\/\\bmoneyline\\b\/gi,\s*""\s*\)/,
+  /\.replace\(\s*\/\\bspread\\b\/gi,\s*""\s*\)/,
+  /\.replace\(\s*\/\\btotal\\b\/gi,\s*""\s*\)/,
+  /\.replace\(\s*\/\\bodds\?\\b\/gi,\s*""\s*\)/,
+  /\.replace\(\s*\/\\bover\\b\/gi,\s*""\s*\)/,
+  /\.replace\(\s*\/\\bunder\\b\/gi,\s*""\s*\)/,
+];
+for (const pattern of forbiddenGlobalDeletions) {
+  forbidInText(appText, pattern, `App sanitizer must not globally delete market words: ${pattern}`);
+  forbidInText(serverText, pattern, `Server sanitizer must not globally delete market words: ${pattern}`);
+}
+
+// 12. capability route and copy must exist
+assert.ok(/function\s+detectCapabilityIntent/.test(serverText), "server.ts must include detectCapabilityIntent");
+assert.ok(/capabilityIntent/.test(serverText), "server.ts must route capability intent");
+assert.ok(/I can check live games, upcoming slates, final scores, probable pitchers, matchup context, and market lines when a source has them\./.test(serverText), "Capability response copy must be present");
+assert.ok(/moneyline/.test(serverText) && /spread/.test(serverText) && /total/.test(serverText), "Capability path must allow normal market words");
+
+// 13. pitcher and slate non-refusal coverage must exist
+assert.ok(/function\s+detectPitcherIntent/.test(serverText), "server.ts must include detectPitcherIntent");
+assert.ok(/function\s+detectSlateIntent/.test(serverText), "server.ts must include detectSlateIntent");
+assert.ok(/ESPN checked the slate\. Probables are not posted yet\./.test(serverText), "Pitcher fallback copy must be present");
+assert.ok(/What games are tomorrow|games?\s+tomorrow|who plays tonight/i.test(serverText), "Slate intent phrases must be covered");
+assert.ok(/buildSlateAnswerFromBoard/.test(serverText), "Slate answer builder must exist");
+assert.ok(/looksLikeOverconstrainedRefusal/.test(serverText), "Over-constrained refusal repair must exist");
+
+// 14. no raw ESPN API URL should be appended to answer body and market-line fallback must be clean
+assert.ok(/buildSourceFooter/.test(serverText), "server.ts must use compact source footer");
+assert.ok(!/ESPN checked source:\s*\$\{[^}]*source_url/i.test(serverText), "server.ts must not append raw source_url in user answer footer");
+assert.ok(!/ESPN checked\s*[•·]\s*https?:\/\/site\.api\.espn\.com/i.test(serverText), "server.ts must not append raw ESPN API URL in answer footer");
+assert.ok(/ESPN checked\. Market line not found yet\./.test(serverText), "Missing line copy must use Market line not found yet");
+assert.ok(!/Market\s*:\s*,\s*,\s*and/i.test(appText), "App sanitizer must block broken market fragments");
 
 // freshness guardrail
 const staleEvidence = buildSourceEvidence(
@@ -122,5 +153,12 @@ assert.equal(isSourceStale(staleEvidence), true, "ESPN source evidence should be
 // explicit non-internal source type from consumer-facing fixture
 const sourceText = readFixtureText("valid_espn_event.json");
 assert.ok(isPublicNonInternalUrl(JSON.parse(sourceText).source_url), "ESPN source URL should be public non-internal");
+
+// 15. repo-level competitor API wording must stay out of runtime source files
+for (const target of ["server.ts", "src/App.tsx", "src/services/geminiService.ts", "src/services/oddsService.ts"]) {
+  const text = readText(target);
+  assert.ok(!/api\\.the-odds-api\\.com/i.test(text), `${target} must not include The Odds API endpoint`);
+  assert.ok(!/The\\s+Odds\\s+API/i.test(text), `${target} must not include The Odds API copy`);
+}
 
 console.log("check:governance passed");

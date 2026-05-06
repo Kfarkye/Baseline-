@@ -144,15 +144,13 @@ function sanitizeConsumerSportsText(text: string): string {
     sanitized = sanitized.replace(pattern, "");
   }
   sanitized = sanitized
-    .replace(/\bmoneyline\b/gi, "")
-    .replace(/\bspread\b/gi, "")
-    .replace(/\bover\s*\/\s*under\b/gi, "")
-    .replace(/\bover\b/gi, "")
-    .replace(/\bunder\b/gi, "")
-    .replace(/\btotal\b/gi, "")
-    .replace(/\bodds?\b/gi, "")
-    .replace(/\bPASS\b/g, "")
-    .replace(/\bsource failure\b/gi, "");
+    .replace(/\bhttps?:\/\/(?:site\.api\.espn\.com|localhost|127\.0\.0\.1)[^\s)\]]*/gi, "ESPN checked")
+    .replace(/\bhttps?:\/\/[^\s)\]]*\/(?:api|mcp)[^\s)\]]*/gi, "Web checked")
+    .replace(/\bPASS\s*-\s*data unavailable\b/gi, "ESPN checked. Market line not found yet.")
+    .replace(/\bsource failure\b/gi, "")
+    .replace(/Market\s*:\s*(?:,\s*)+(?:and\s*)?/gi, "Market line not found yet. ")
+    .replace(/\bMarket odds not found yet\b/gi, "Market line not found yet")
+    .replace(/\bmarket odds not found yet\b/gi, "Market line not found yet");
   sanitized = sanitized.replace(/\n{3,}/g, "\n\n").trim();
   return sanitized || "No publishable answer is available right now.";
 }
@@ -172,7 +170,7 @@ function formatEsportsTimestamp(input?: string): string {
 
 function describeOddsLine(odd: SportOdds): string {
   if (odd.market_data_status?.state !== "partial") return "";
-  return `ESPN checked • Market odds not found yet • ${formatEsportsTimestamp(odd.fetched_at) || "updated now"}`;
+  return `ESPN checked · Market line not found yet · ${formatEsportsTimestamp(odd.fetched_at) || "updated now"}`;
 }
 
 function buildAuthErrorMessage(errorCode: string): string {
@@ -942,7 +940,7 @@ export default function App() {
                                     </>
                                   ) : (
                                     <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-4 py-3 text-[11px] uppercase tracking-widest text-zinc-500">
-                                      {describeOddsLine(odd) || "ESPN checked. Market odds not found yet."}
+                                      {describeOddsLine(odd) || "ESPN checked. Market line not found yet."}
                                     </div>
                                   )}
                                 </div>
@@ -1410,7 +1408,7 @@ export default function App() {
                               </div>
                             )}
                             {!moneylineStr && !totalPoint && odd.market_data_status?.state === "partial" && (
-                              <span className="text-[10px] uppercase tracking-widest text-zinc-500">ESPN checked • market odds not found yet</span>
+                              <span className="text-[10px] uppercase tracking-widest text-zinc-500">ESPN checked · market line not found yet</span>
                             )}
                           </div>
                         </div>
@@ -1875,7 +1873,7 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
          ) : (
            <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-3 py-4">
              <span className="text-[10px] uppercase tracking-widest text-zinc-500">
-               {describeOddsLine(odd) || "ESPN checked. Market odds not found yet."}
+               {describeOddsLine(odd) || "ESPN checked. Market line not found yet."}
              </span>
            </div>
          )}

@@ -3,7 +3,7 @@ import { z } from "zod";
 export const ODDS_UNAVAILABLE_PARTIAL = {
   state: "partial" as const,
   code: "ODDS_UNAVAILABLE_BUT_GAME_GROUNDED",
-  message: "ESPN checked. Market odds not found yet.",
+  message: "ESPN checked. Market line not found yet.",
   allowed_output: "score/state/simple pace only",
 };
 
