@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity validations
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'email', 'balance', 'planTier']) &&
+             data.keys().size() >= 4 &&
+             data.userId == request.auth.uid &&
+             data.email is string && data.email.size() <= 200 &&
+             data.balance is number && data.balance >= 0;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['text', 'role', 'timestamp']) &&
+             data.keys().size() == 3 &&
+             data.text is string && data.text.size() <= 500000 &&
+             data.role in ['user', 'model'] &&
+             data.timestamp is timestamp;
+    }
+
+    function isValidRecommendation(data) {
+      return data.keys().hasAll(['matchName', 'odds', 'reasoning', 'prediction']) &&
+             data.matchName is string && data.matchName.size() <= 500 &&
+             data.odds is number &&
+             data.reasoning is string && data.reasoning.size() <= 2000 &&
+             data.prediction is string;
+    }
+
+    // 1. Users Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().balance == 0;
+      allow update: if isOwner(userId) && (
+        // Action: Update Profile/Preferences
+        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'preferences', 'updatedAt']) && 
+         incoming().updatedAt == request.time) ||
+        // Action: Wallet Deposit
+        (incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'updatedAt']) && 
+         incoming().balance > existing().balance) ||
+        // Action: Update Query Tracking
+        incoming().diff(existing()).affectedKeys().hasOnly(['queryCount', 'lastQueryDate', 'updatedAt'])
+      );
+    }
+
+    // 2. Chat History (Subcollection of User)
+    match /users/{userId}/chats/{chatId} {
+      allow list, get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidChatMessage(incoming());
+    }
+
+    // 3. Recommendations
+    match /users/{userId}/recommendations/{recId} {
+      allow list, get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidRecommendation(incoming());
+    }
+    function isValidArtifact(data) {
+      return data.keys().hasAll(['content', 'type', 'createdAt', 'creatorId', 'title', 'source', 'fetchedAt']) &&
+             data.content is string && data.content.size() <= 1048576 &&
+             data.type is string && data.type in ['html', 'python', 'markdown'] &&
+             data.createdAt is timestamp &&
+             data.creatorId == request.auth.uid &&
+             data.title is string && data.title.size() <= 200 &&
+             data.source is string && data.source.size() <= 1024 &&
+             data.fetchedAt is timestamp;
+    }
+
+    // 4. Artifacts (Public read, list for owner, authenticated write)
+    match /artifacts/{artifactId} {
+      allow get: if true;
+      allow list: if isSignedIn() && resource.data.creatorId == request.auth.uid;
+      allow create: if isSignedIn() && isValidArtifact(incoming()) && incoming().createdAt == request.time && incoming().fetchedAt == request.time;
+    }
+  }
+}

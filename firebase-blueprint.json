@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account details including wallet and preferences",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "balance": { "type": "number" },
+        "preferences": {
+          "type": "object",
+          "properties": {
+            "favoriteLeagues": { "type": "array", "items": { "type": "string" } },
+            "riskLevel": { "type": "string", "enum": ["low", "medium", "high"] }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "balance"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "A message in a chat thread",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "model"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "role", "timestamp"]
+    },
+    "BetRecommendation": {
+      "title": "Bet Recommendation",
+      "description": "A suggested bet from the AI",
+      "type": "object",
+      "properties": {
+        "matchName": { "type": "string" },
+        "odds": { "type": "number" },
+        "reasoning": { "type": "string" },
+        "prediction": { "type": "string" },
+        "confidence": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["matchName", "odds", "reasoning", "prediction"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profiles"
+    },
+    "/users/{userId}/chats/{chatId}": {
+      "schema": "ChatMessage",
+      "description": "Stores user chat messages"
+    },
+    "/users/{userId}/recommendations/{recId}": {
+      "schema": "BetRecommendation",
+      "description": "Stores AI generated bet recommendations for the user"
+    }
+  }
+}

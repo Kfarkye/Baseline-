@@ -1,0 +1,6 @@
+{
+  "name": "Baseline",
+  "description": "Direct institutional market data and statistical sports analysis.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": []
+}
