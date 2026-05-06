@@ -9,6 +9,11 @@ import {
   User as UserIcon, 
   Send, 
   ChevronRight,
+  Menu,
+  PenSquare,
+  MoreHorizontal,
+  Plus,
+  Mic,
   LogOut,
   PlusCircle,
   RefreshCw,
@@ -231,6 +236,7 @@ export default function App() {
   const [artifactsList, setArtifactsList] = useState<ArtifactMeta[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isMobileTabMenuOpen, setIsMobileTabMenuOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -570,6 +576,12 @@ export default function App() {
     }
   }, [user, activeTab]);
 
+  const isMobileChatScreen = location.pathname === '/' && activeTab === 'chat';
+
+  React.useEffect(() => {
+    setIsMobileTabMenuOpen(false);
+  }, [activeTab]);
+
   return (
     <div className="flex min-h-[100dvh] bg-paper text-ink font-sans overflow-hidden relative">
       {/* Subtle Ambient Bleed */}
@@ -578,14 +590,14 @@ export default function App() {
       <div className="ambient-blob ambient-blob-3"></div>
       <div className="absolute inset-0 bg-paper/60 backdrop-blur-[100px] z-0 pointer-events-none" />
 
-      <div className="flex h-full w-full z-10 relative flex-col md:flex-row">
+      <div className="flex h-full w-full z-10 relative">
       {/* Primary Global Navigation */}
-      <aside className="w-full md:w-16 flex md:flex-col items-center md:items-center justify-between md:justify-start px-3 md:px-0 py-3 md:py-8 border-b md:border-b-0 md:border-r border-zinc-200 bg-paper shrink-0 z-30 safe-area-top safe-area-x">
-        <div className="md:mb-10 shrink-0">
-          <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center font-serif italic text-2xl md:text-3xl font-medium text-brand select-none leading-none">B</div>
+      <aside className="hidden md:flex w-16 flex-col items-center py-8 border-r border-zinc-200 bg-paper shrink-0 z-30">
+        <div className="mb-10">
+          <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none">B</div>
         </div>
         
-        <nav className="flex md:flex-col gap-2 md:gap-6 flex-1 md:flex-none justify-center overflow-x-auto no-scrollbar px-2 md:px-0">
+        <nav className="flex flex-col gap-6 flex-1">
             <SideNavIcon 
               active={activeTab === 'chat'} 
               onClick={() => setActiveTab('chat')}
@@ -613,11 +625,11 @@ export default function App() {
               />
         </nav>
 
-        <div className="md:mt-auto flex md:flex-col gap-2 md:gap-6 items-center shrink-0">
+        <div className="mt-auto flex flex-col gap-6 items-center">
           <button onClick={() => setShowAboutModal(true)} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50/80 transition-all duration-300">
             <Info size={20} strokeWidth={1.5} />
           </button>
-          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-brand hover:bg-brand/10 transition-all duration-300 md:mb-2">
+          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-brand hover:bg-brand/10 transition-all duration-300 mb-2">
             <Zap size={20} strokeWidth={1.5} />
           </button>
         </div>
@@ -672,10 +684,21 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-paper safe-area-bottom">
+      <main className="flex-1 flex flex-col min-w-0 bg-paper safe-area-bottom relative">
         {/* Unified Header */}
-        <header className="h-16 flex items-center justify-between px-4 sm:px-6 xl:px-10 border-b border-zinc-100/80 bg-paper/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20 safe-area-top">
-          <div className="flex items-center gap-6">
+        <header className={cn(
+          "h-16 items-center justify-between px-4 sm:px-6 xl:px-10 border-b border-zinc-100/80 bg-paper/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20 safe-area-top",
+          isMobileChatScreen ? "hidden md:flex" : "flex"
+        )}>
+          <div className="flex items-center gap-4 sm:gap-6">
+            <button
+              type="button"
+              onClick={() => setIsMobileTabMenuOpen((prev) => !prev)}
+              className="md:hidden w-10 h-10 rounded-full border border-zinc-200 bg-white/90 text-zinc-700 flex items-center justify-center"
+              aria-label="Open navigation menu"
+            >
+              <Menu size={18} />
+            </button>
             {location.pathname !== '/' && (
               <h1 className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">
                 {location.pathname === '/pricing' ? 'Upgrade' : 'Daily Board'}
@@ -726,6 +749,44 @@ export default function App() {
           </div>
         </header>
 
+        <AnimatePresence>
+          {isMobileTabMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="md:hidden fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
+              onClick={() => setIsMobileTabMenuOpen(false)}
+            >
+              <motion.div
+                initial={{ x: -24, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -24, opacity: 0 }}
+                transition={{ duration: 0.16 }}
+                className="absolute left-3 right-3 top-[max(0.75rem,env(safe-area-inset-top))] bg-white border border-zinc-200 rounded-2xl shadow-xl p-3"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button type="button" onClick={() => { setActiveTab('chat'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'chat' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Chat</button>
+                  <button type="button" onClick={() => { setActiveTab('odds'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'odds' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Daily Board</button>
+                  <button type="button" onClick={() => { setActiveTab('ledger'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'ledger' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Ledger</button>
+                  <button type="button" onClick={() => { setActiveTab('wallet'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'wallet' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Schedule</button>
+                  <button type="button" onClick={() => { user ? setActiveTab('artifacts') : handleLogin(); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'artifacts' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Artifacts</button>
+                  <button type="button" onClick={() => { navigate('/pricing'); setIsMobileTabMenuOpen(false); }} className="rounded-xl px-3 py-3 text-left text-sm border border-zinc-200 text-zinc-700">Pricing</button>
+                </div>
+                <div className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-3">
+                  <button type="button" onClick={() => { setShowAboutModal(true); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">About</button>
+                  {user ? (
+                    <button type="button" onClick={() => { handleLogout(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">Sign Out</button>
+                  ) : (
+                    <button type="button" onClick={() => { handleLogin(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">Sign In</button>
+                  )}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="flex-1 flex flex-col xl:flex-row overflow-hidden relative">
           <div className="flex-1 flex flex-col min-w-0 xl:border-r border-zinc-100 relative">
              <Routes>
@@ -739,7 +800,45 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="h-full flex flex-col max-w-5xl mx-auto w-full"
                 >
-                  <div className="flex-1 px-4 sm:px-6 lg:px-10 xl:px-12 py-6 md:py-8 overflow-y-auto space-y-10 custom-scrollbar pb-44 md:pb-48">
+                  <div className="md:hidden px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 border-b border-zinc-100/80 bg-paper/90 backdrop-blur-sm sticky top-0 z-20">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileTabMenuOpen((prev) => !prev)}
+                        className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
+                        aria-label="Open navigation menu"
+                      >
+                        <Menu size={19} />
+                      </button>
+                      <div className="px-5 h-11 rounded-full bg-white/95 border border-zinc-200 text-brand text-[15px] font-medium flex items-center justify-center min-w-[128px]">
+                        {isTyping ? "Thinking" : "Baseline"}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInputText('');
+                            setGroundingMode(null);
+                            setActiveTab('chat');
+                          }}
+                          className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
+                          aria-label="New chat"
+                        >
+                          <PenSquare size={19} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowAboutModal(true)}
+                          className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
+                          aria-label="More actions"
+                        >
+                          <MoreHorizontal size={19} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 px-4 sm:px-6 lg:px-10 xl:px-12 py-5 md:py-8 overflow-y-auto space-y-8 md:space-y-10 custom-scrollbar pb-36 md:pb-48">
                     {messages.length === 0 && (
                       <div className="pb-8 pt-4">
                         <div className="mb-8">
@@ -892,8 +991,8 @@ export default function App() {
                    </div>
                    
                    {/* Minimal Input Area */}
-                   <div className="px-4 sm:px-6 lg:px-10 xl:px-12 pt-4 pb-4 sticky bottom-0 bg-paper/95 backdrop-blur-md border-t border-zinc-100/70 flex flex-col z-20 safe-area-bottom">
-                     <div className="flex gap-2 mb-3 flex-wrap">
+                   <div className="px-3 sm:px-6 lg:px-10 xl:px-12 pt-3 pb-3 sticky bottom-0 bg-paper/95 backdrop-blur-md border-t border-zinc-100/70 flex flex-col z-20 safe-area-bottom">
+                     <div className="hidden md:flex gap-2 mb-3 flex-wrap">
                        {(['live', 'stats', 'trends'] as const).map(mode => {
                          const isActive = groundingMode === mode;
                          return (
@@ -918,7 +1017,7 @@ export default function App() {
                      </div>
                      
                      {messages.length === 0 && (
-                       <div className="flex flex-wrap gap-3 mb-4">
+                       <div className="hidden md:flex flex-wrap gap-3 mb-4">
                          {getSuggestions().map((sug, idx) => (
                            <button 
                              key={idx}
@@ -932,25 +1031,61 @@ export default function App() {
                        </div>
                      )}
 
-                     <form onSubmit={sendMessage} className="relative shadow-sm rounded-lg flex gap-2 w-full">
+                     <div className="md:hidden flex gap-2 mb-2 overflow-x-auto no-scrollbar pb-1">
+                       {(['live', 'stats', 'trends'] as const).map(mode => {
+                         const isActive = groundingMode === mode;
+                         return (
+                           <button
+                             key={mode}
+                             type="button"
+                             onClick={() => toggleMode(mode)}
+                             className={cn(
+                               "flex items-center justify-center whitespace-nowrap transition-all text-[10px] rounded-full px-3 py-1.5 uppercase tracking-wide border",
+                               isActive
+                                 ? "bg-[#2D4A3E]/10 border-[#2D4A3E]/60 text-brand font-medium"
+                                 : "bg-white border-zinc-200 text-zinc-600"
+                             )}
+                           >
+                             {mode}
+                           </button>
+                         );
+                       })}
+                     </div>
+
+                     <form onSubmit={sendMessage} className="relative shadow-sm rounded-full flex items-center gap-2 w-full bg-white border border-zinc-200 px-3 py-2">
+                       <button
+                         type="button"
+                         onClick={() => setIsMobileTabMenuOpen(true)}
+                         className="md:hidden w-9 h-9 rounded-full text-zinc-700 hover:bg-zinc-100 flex items-center justify-center"
+                         aria-label="Open quick actions"
+                       >
+                         <Plus size={20} />
+                       </button>
                        <input 
                          type="text"
                          value={inputText}
                          onChange={(e) => setInputText(e.target.value)}
-                         placeholder="What's happening tonight?"
-                         className="w-full bg-white border border-zinc-200 rounded-lg px-5 py-4 focus:outline-none focus:border-zinc-500 transition-all text-sm text-ink placeholder:text-zinc-500 placeholder:italic placeholder:font-serif"
+                         placeholder="Ask Baseline"
+                         className="w-full bg-transparent border-none rounded-lg px-1 md:px-3 py-2 md:py-3 focus:outline-none transition-all text-base md:text-sm text-ink placeholder:text-zinc-500"
                        />
+                       <button 
+                         type="button"
+                         className="md:hidden w-9 h-9 rounded-full text-zinc-500 hover:bg-zinc-100 flex items-center justify-center"
+                         aria-label="Voice input"
+                       >
+                         <Mic size={18} />
+                       </button>
                        <button 
                          type="submit"
                          disabled={!inputText.trim() || isTyping}
-                         className="absolute right-6 top-1/2 -translate-y-1/2 text-brand hover:text-ink transition-colors disabled:opacity-20"
+                         className="w-10 h-10 rounded-full bg-ink text-white flex items-center justify-center transition-colors disabled:opacity-30"
                        >
-                         <Send size={18} strokeWidth={1.5} />
+                         <Send size={18} strokeWidth={1.8} />
                        </button>
                      </form>
                    </div>
-                 </motion.div>
-               )}
+                </motion.div>
+              )}
 
                {activeTab === 'odds' && (
                  <motion.div 
@@ -1169,7 +1304,10 @@ export default function App() {
           </div>
 
           {/* Sidebar / Bottom Rail */}
-          <aside className="w-full xl:w-80 bg-white flex flex-col shrink-0 border-t xl:border-t-0 xl:border-l border-zinc-100 xl:overflow-y-auto custom-scrollbar safe-area-bottom">
+          <aside className={cn(
+            "w-full xl:w-80 bg-white flex flex-col shrink-0 border-t xl:border-t-0 xl:border-l border-zinc-100 xl:overflow-y-auto custom-scrollbar safe-area-bottom",
+            activeTab === 'chat' ? "hidden xl:flex" : ""
+          )}>
             {/* Mobile Toggle */}
             <button 
               className="xl:hidden w-full h-16 flex items-center justify-between px-4 sm:px-6 border-b border-zinc-100 bg-white sticky top-0 z-10"
@@ -1493,10 +1631,10 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn("grid grid-cols-[1fr] gap-4 max-w-2xl", !isAI && "ml-auto text-right")}
+      className={cn("grid grid-cols-[1fr] gap-3 md:gap-4 max-w-3xl", !isAI && "ml-auto w-full md:w-auto")}
     >
       <div className="space-y-4">
-        <div className={cn("flex items-center gap-3", !isAI && "justify-end")}>
+        <div className={cn("hidden md:flex items-center gap-3", !isAI && "justify-end")}>
           <span className="text-[8px] font-bold uppercase tracking-[0.4em] text-zinc-500">
             {isAI ? 'Analysis' : 'You'}
           </span>
@@ -1504,8 +1642,10 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
           <span className="text-[8px] font-mono text-zinc-500 uppercase tabular-nums">06:05:26</span>
         </div>
         <div className={cn(
-          "text-sm leading-[1.8] tracking-tight",
-          isAI ? "text-zinc-700 prose prose-emerald max-w-none prose-sm font-normal" : "text-ink font-medium serif-italic text-lg px-6 border-r border-brand/20"
+          "leading-[1.8] tracking-tight text-[15px] md:text-sm",
+          isAI
+            ? "text-zinc-800 md:text-zinc-700 prose prose-emerald max-w-none prose-sm font-normal"
+            : "ml-auto max-w-[88%] md:max-w-none rounded-3xl bg-ink text-white md:bg-transparent md:text-ink font-medium md:serif-italic text-base md:text-lg px-4 py-3 md:px-6 md:py-0 md:border-r md:border-brand/20 text-left"
         )}>
           {isAI ? (
             <ReactMarkdown 
