@@ -66,7 +66,7 @@ export async function runInsightEngine({ userId, publicData, operatorPrompt }: I
   `;
 
   // Provide to LLM
-  return getBettingInsights(`${systemContext}\n\n${userPrompt}`);
+  return getBettingInsights([`${systemContext}\n\n${userPrompt}`]);
 }
 
 /**

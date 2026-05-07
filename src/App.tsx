@@ -1,76 +1,130 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  MessageSquare, 
-  TrendingUp, 
+import React, { useState, useEffect, useRef } from "react";
+
+export const getPitcherLiveStats = (pitcher: any) => {
+  if (!pitcher) return "Currently Pitching";
+  const pc = pitcher.pitchCount ? `${pitcher.pitchCount} PC` : "";
+  const era = pitcher.gameEra ? `${pitcher.gameEra} ERA` : "";
+  if (pc || era) {
+    return [pc, era].filter(Boolean).join(" · ");
+  }
+  return pitcher.summary || "Pitching";
+};
+import { motion, AnimatePresence } from "motion/react";
+import {
+  MessageSquare,
+  TrendingUp,
   Calendar,
-  Wallet, 
-  Settings, 
-  User as UserIcon, 
-  Send, 
+  Wallet,
+  Settings,
+  User as UserIcon,
+  Send,
   ChevronRight,
-  Menu,
-  PenSquare,
-  MoreHorizontal,
-  Plus,
-  Mic,
+  ChevronDown,
   LogOut,
+  AlertCircle,
   PlusCircle,
+  Plus,
   RefreshCw,
   BarChart,
-  Zap
-} from 'lucide-react';
-import { auth, db } from './lib/firebase';
-import { 
-  browserLocalPersistence,
-  getRedirectResult,
-  signInWithRedirect,
+  Zap,
+  Check,
+  Wind,
+  Cloud,
+  MapPin,
+  ShieldCheck,
+  Activity,
+  Clock,
+  History,
+  LayoutGrid,
+  Mic,
+  Paperclip,
+} from "lucide-react";
+import { auth, db } from "./lib/firebase";
+import {
   signInWithPopup,
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  setPersistence,
+  GoogleAuthProvider,
+  onAuthStateChanged,
   signOut,
-  User as FirebaseUser
-} from 'firebase/auth';
-import { 
-  doc, 
-  getDoc, 
-  setDoc, 
-  collection, 
-  addDoc, 
-  query, 
+  User as FirebaseUser,
+} from "firebase/auth";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  addDoc,
+  query,
+  orderBy,
   onSnapshot,
   serverTimestamp,
   updateDoc,
-  where
-} from 'firebase/firestore';
-import { cn, formatCurrency } from './lib/utils';
-import { Routes, Route, useNavigate, useParams, Link } from 'react-router-dom';
-import { fetchCurrentOdds, listenToLiveOdds, SportOdds } from './services/oddsService';
-import { getBettingInsights, ChatMessage } from './services/geminiService';
-import { APP_SHELL_LINKS, IOS_WRAPPER_NOTE } from './lib/appShellConfig';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
-import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Download, Bot, Copy, Code, TerminalSquare, FileText, Globe, Info, X } from 'lucide-react';
+  where,
+} from "firebase/firestore";
+import { cn, formatCurrency } from "./lib/utils";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  useNavigate,
+  useParams,
+  Link,
+} from "react-router-dom";
+import {
+  fetchCurrentOdds,
+  listenToLiveOdds,
+  SportOdds,
+} from "./services/oddsService";
+import { getBettingInsights, analyzeBetSlip, ChatMessage as GeminiChatMessage } from "./services/geminiService";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
+import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import {
+  Download,
+  Bot,
+  Copy,
+  Code,
+  TerminalSquare,
+  FileText,
+  Globe,
+  Info,
+  UploadCloud,
+  ImageIcon,
+  Loader2,
+  Camera,
+  X,
+  Search,
+  Code2,
+  Eye,
+} from "lucide-react";
+import { BaseballDiamond } from "./components/BaseballDiamond";
+import GameDetail from "./GameDetail";
 
-SyntaxHighlighter.registerLanguage('python', python);
+SyntaxHighlighter.registerLanguage("python", python);
 
 // --- Types ---
+interface ChatMessage extends GeminiChatMessage {
+  id?: string;
+  timestamp?: any;
+}
+
+interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+}
+
 interface UserData {
   userId: string;
   email: string;
   displayName: string;
   balance: number;
-  planTier: 'free' | 'pro' | 'sharp';
-  isAdmin?: boolean;
+  planTier: "free" | "pro" | "sharp";
   queryCount: number;
   lastQueryDate: string;
   preferences: {
     favoriteLeagues: string[];
-    riskLevel: 'low' | 'medium' | 'high';
+    riskLevel: "low" | "medium" | "high";
   };
 }
 
@@ -114,279 +168,517 @@ const MLB_TEAM_MAP: Record<string, string> = {
   "Tampa Bay Rays": "tb",
   "Texas Rangers": "tex",
   "Toronto Blue Jays": "tor",
-  "Washington Nationals": "wsh"
+  "Washington Nationals": "wsh",
 };
 
 export const getEspnLogo = (teamName: string) => {
   const abbr = MLB_TEAM_MAP[teamName];
-  return abbr 
+  return abbr
     ? `https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/${abbr}.png`
     : `https://api.dicebear.com/7.x/identicon/svg?seed=${teamName}&backgroundColor=FAF9F6&fontFamily=serif`;
 };
 
-const BANNED_CONSUMER_PATTERNS: RegExp[] = [
-  /confidence\s*score\s*:?[^\n]*/gi,
-  /edge\s*score\s*:?[^\n]*/gi,
-  /raw\s*rpc\s*names?\s*:?[^\n]*/gi,
-  /internal\s*payload\s*names?\s*:?[^\n]*/gi,
-  /payload\s*contract\s*:?[^\n]*/gi,
-  /grounding/gi,
-  /governance/gi,
-  /sportsanswerstate\s*:?[^\n]*/gi,
-  /failurestate\s*:?[^\n]*/gi,
-  /auditevent\s*:?[^\n]*/gi,
-  /\bquant\s*language\b/gi,
-];
+const OddsDisplay = ({ price }: { price: number | string | undefined }) => {
+  if (price === undefined) return null;
+  const displayPrice =
+    typeof price === "number"
+      ? price > 0
+        ? `+${price}`
+        : price
+      : price.toString().startsWith("+") || price.toString().startsWith("-")
+        ? price
+        : `+${price}`;
 
-function sanitizeConsumerSportsText(text: string): string {
-  let sanitized = text;
-  for (const pattern of BANNED_CONSUMER_PATTERNS) {
-    sanitized = sanitized.replace(pattern, "");
-  }
-  sanitized = sanitized
-    .replace(/\bhttps?:\/\/(?:site\.api\.espn\.com|localhost|127\.0\.0\.1)[^\s)\]]*/gi, "ESPN checked")
-    .replace(/\bhttps?:\/\/[^\s)\]]*\/(?:api|mcp)[^\s)\]]*/gi, "Web checked")
-    .replace(/\bPASS\s*-\s*data unavailable\b/gi, "ESPN checked. Market line not found yet.")
-    .replace(/\bsource failure\b/gi, "")
-    .replace(/Market\s*:\s*(?:,\s*)+(?:and\s*)?/gi, "Market line not found yet. ")
-    .replace(/\bMarket odds not found yet\b/gi, "Market line not found yet")
-    .replace(/\bmarket odds not found yet\b/gi, "Market line not found yet");
-  sanitized = sanitized.replace(/\n{3,}/g, "\n\n").trim();
-  return sanitized || "No publishable answer is available right now.";
-}
-
-function formatEsportsTimestamp(input?: string): string {
-  if (!input) return "";
-  const parsed = Date.parse(input);
-  if (Number.isNaN(parsed)) return "";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(parsed);
-}
-
-function describeOddsLine(odd: SportOdds): string {
-  if (odd.market_data_status?.state !== "partial") return "";
-  return `ESPN checked · Market line not found yet · ${formatEsportsTimestamp(odd.fetched_at) || "updated now"}`;
-}
-
-function buildAuthErrorMessage(errorCode: string): string {
-  if (errorCode === "auth/unauthorized-domain") {
-    return `Sign-in was blocked for ${window.location.hostname}. Ask an admin to add this domain under Firebase Auth and OAuth authorized domains/origins.`;
-  }
-  if (errorCode === "auth/popup-blocked") {
-    return "Popup was blocked. Trying sign-in by redirect.";
-  }
-  if (errorCode === "auth/web-storage-unsupported") {
-    return "This browser cannot complete popup sign-in. Try a supported browser.";
-  }
-  if (errorCode === "auth/operation-not-supported-in-this-environment") {
-    return "Popup sign-in is not supported in this environment. Trying redirect.";
-  }
-  if (errorCode === "auth/cancelled-popup-request") {
-    return "Sign-in popup was cancelled.";
-  }
-  return `Sign-in failed: ${errorCode}`;
-}
-
-function PitcherDisplay({ teamFull, headshot, name, record, alignRight = false, small = false }: { teamFull: string, headshot?: string, name?: string, record?: string, alignRight?: boolean, small?: boolean }) {
-  const teamAbbr = MLB_TEAM_MAP[teamFull as keyof typeof MLB_TEAM_MAP] || teamFull.substring(0, 3);
-  const fallbackImg = `https://api.dicebear.com/7.x/initials/svg?seed=${name || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`;
+  const isPositive = typeof price === "number" ? price > 0 : price.toString().startsWith('+');
 
   return (
-    <div className={`flex items-center gap-3 ${alignRight ? 'justify-end flex-row-reverse text-right' : ''}`}>
-      <div className={`${small ? 'w-8 h-8' : 'w-10 h-10'} rounded-full overflow-hidden bg-zinc-100 shrink-0 shadow-sm border border-zinc-200`}>
-        <img 
-            src={headshot || fallbackImg} 
-            className="w-full h-full object-cover scale-110" 
-            alt={name || 'TBA'} 
+    <div className={cn(
+      "font-mono font-bold text-[10px] uppercase tracking-tight ring-1 ring-inset px-2.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all",
+      isPositive 
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-600/10" 
+        : "bg-white text-zinc-600 ring-zinc-200"
+    )}>
+      {displayPrice}
+    </div>
+  );
+};
+
+function PitcherDisplay({
+  teamFull,
+  headshot,
+  name,
+  record,
+  alignRight = false,
+  small = false,
+}: {
+  teamFull: string;
+  headshot?: string;
+  name?: string;
+  record?: string;
+  alignRight?: boolean;
+  small?: boolean;
+}) {
+  const teamAbbr =
+    MLB_TEAM_MAP[teamFull as keyof typeof MLB_TEAM_MAP] ||
+    teamFull.substring(0, 3);
+  const fallbackImg = `https://api.dicebear.com/7.x/initials/svg?seed=${name || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`;
+
+  return (
+    <div
+      className={cn("flex items-center gap-3", alignRight && "flex-row-reverse text-right")}
+    >
+      <div
+        className={cn(
+          small ? "w-9 h-9" : "w-12 h-12",
+          "rounded-full overflow-hidden bg-zinc-50 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-zinc-200/60 transition-transform group-hover:scale-105"
+        )}
+      >
+        <img
+          src={headshot || fallbackImg}
+          className="w-full h-full object-cover scale-110"
+          alt={name || "TBA"}
         />
       </div>
-      <div className={`flex flex-col ${alignRight ? 'items-end' : ''}`}>
-        <div className={`flex items-center gap-1.5 mb-0.5 ${alignRight ? 'flex-row-reverse' : ''}`}>
-          <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{teamAbbr.toUpperCase()}</span>
+      <div className={cn("flex flex-col", alignRight && "items-end")}>
+        <div
+          className={cn("flex items-center gap-1.5 mb-0.5", alignRight && "flex-row-reverse")}
+        >
+          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">
+            {teamAbbr.toUpperCase()}
+          </span>
         </div>
-        <span className={`${small ? 'text-xs' : 'text-sm'} font-semibold text-zinc-700 leading-none mb-1`}>{name || 'TBA'}</span>
-        <span className="text-[10px] font-mono text-zinc-800">{record || '-'}</span>
+        <span
+          className={cn(
+            small ? "text-sm" : "text-base",
+            "font-medium text-zinc-900 leading-none mb-1 serif"
+          )}
+        >
+          {name || "TBA"}
+        </span>
+        <span className="text-[10px] md:text-xs font-mono text-zinc-500">
+          {record || "-"}
+        </span>
       </div>
     </div>
   );
 }
 
+
+const CommandCenterModal = ({ 
+    isMenuOpen, 
+    setIsMenuOpen, 
+    setActiveTab, 
+    navigate,
+    slateFilter,
+    setSlateFilter,
+    gameStatusFilter,
+    setGameStatusFilter,
+    oddsSource,
+    setOddsSource,
+    setSelectedBookie
+}: any) => {
+    if (typeof isMenuOpen === 'undefined') return null;
+    return (
+    <AnimatePresence>
+        {isMenuOpen && (
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
+                className="fixed inset-0 z-[100] bg-white/80 backdrop-blur-[40px] p-6 flex flex-col xl:hidden overflow-y-auto"
+            >
+                <div className="flex justify-between items-center mb-12">
+                    <div className="text-3xl font-serif italic text-brand">B</div>
+                    <button onClick={() => setIsMenuOpen(false)} className="text-sm font-bold tracking-widest uppercase text-zinc-500 hover:text-ink">
+                        Close
+                    </button>
+                </div>
+                
+                <nav className="flex flex-col gap-10">
+                    <div className="flex flex-col gap-4">
+                        <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">Navigation</span>
+                        <button onClick={() => { navigate("/"); setActiveTab("board"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Board</button>
+                        <button onClick={() => { navigate("/"); setActiveTab("analysis"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Analysis</button>
+                        <button onClick={() => { navigate("/"); setActiveTab("ledger"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Ledger</button>
+                        <button onClick={() => { navigate("/"); setActiveTab("market"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Market</button>
+                    </div>
+
+                    <div className="flex flex-col gap-6">
+                        <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">Filters</span>
+                        
+                        <div className="flex flex-col gap-2">
+                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Date</span>
+                           <div className="flex flex-wrap gap-2">
+                           {["previous", "today", "tomorrow"].map(filter => (
+                                <button key={filter} onClick={() => setSlateFilter?.(filter as any)} className={cn("px-0 py-1 text-sm font-medium border-b-2", slateFilter === filter ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-400 font-normal")}>{filter.charAt(0).toUpperCase() + filter.slice(1)}</button>
+                           ))}
+                           </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Game Status</span>
+                           <div className="flex flex-wrap gap-2">
+                           {["all", "pregame", "live", "ended"].map(filter => (
+                                <button key={filter} onClick={() => setGameStatusFilter?.(filter as any)} className={cn("px-0 py-1 text-sm font-medium border-b-2", gameStatusFilter === filter ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-400 font-normal")}>{filter.charAt(0).toUpperCase() + filter.slice(1)}</button>
+                           ))}
+                           </div>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                        <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">Market Source</span>
+                        <div className="flex flex-col gap-2">
+                           {["sportsbook", "prediction"].map(source => (
+                                <button key={source} onClick={() => { setOddsSource?.(source as any); setSelectedBookie?.("All Bookmakers"); }} className={cn("px-0 py-1 text-left text-sm font-medium border-b-2", oddsSource === source ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-400 font-normal")}>{source.charAt(0).toUpperCase() + source.slice(1)} Markets</button>
+                           ))}
+                        </div>
+                    </div>
+                </nav>
+            </motion.div>
+        )}
+    </AnimatePresence>
+    );
+};
+
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [odds, setOdds] = useState<SportOdds[]>([]);
   const [isLoadingOdds, setIsLoadingOdds] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState('');
+  const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'odds' | 'ledger' | 'wallet' | 'artifacts'>('chat');
+  const [attachment, setAttachment] = useState<{name: string, type: string, data: string} | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeTab, setActiveTab] = useState<
+    "board" | "analysis" | "ledger" | "market"
+  >("board");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (isMenuOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+        document.body.style.overflow = "";
+    };
+  }, [isMenuOpen]);
+  const [isSlateOpen, setIsSlateOpen] = useState(false);
   const [isSlateExpanded, setIsSlateExpanded] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
-  const [groundingMode, setGroundingMode] = useState<'live' | 'stats' | 'trends' | null>(null);
-  const [slateFilter, setSlateFilter] = useState<'previous' | 'today' | 'tomorrow'>('today');
+  const [groundingMode, setGroundingMode] = useState<
+    "live" | "stats" | "trends" | null
+  >(null);
+  const [slateFilter, setSlateFilter] = useState<
+    "previous" | "today" | "tomorrow"
+  >("today");
+  const [gameStatusFilter, setGameStatusFilter] = useState<
+    "all" | "pregame" | "live" | "ended"
+  >("all");
+  const [selectedBookie, setSelectedBookie] =
+    useState<string>("All Bookmakers");
+  const [oddsSource, setOddsSource] = useState<"sportsbook" | "prediction">("sportsbook");
+  const [selectedMarket, setSelectedMarket] = useState<string>("all");
+  const [minOdds, setMinOdds] = useState<string>("");
+  const [maxOdds, setMaxOdds] = useState<string>("");
+  const [showFilters, setShowFilters] = useState(false);
   const [sharedArtifact, setSharedArtifact] = useState<string | null>(null);
   const [isLoadingArtifact, setIsLoadingArtifact] = useState(false);
   const [artifactsList, setArtifactsList] = useState<ArtifactMeta[]>([]);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [isMobileTabMenuOpen, setIsMobileTabMenuOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const userMenuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
+  const [aiStatus, setAiStatus] = useState<"checking" | "online" | "error">("checking");
+  const [ledgerFile, setLedgerFile] = useState<File | null>(null);
+  const [ledgerPreview, setLedgerPreview] = useState<string | null>(null);
+  const [isAnalyzingLedger, setIsAnalyzingLedger] = useState(false);
+  const [ledgerAnalysis, setLedgerAnalysis] = useState<string | null>(null);
+
+  const [scheduleTeamFilter, setScheduleTeamFilter] = useState('');
+
   useEffect(() => {
-    setPersistence(auth, browserLocalPersistence).catch((error) => {
-      console.error("Auth persistence setup failed:", error);
-    });
-    getRedirectResult(auth).catch((error) => {
-      const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : "";
-      const mapped = code ? buildAuthErrorMessage(code) : "Redirect sign-in failed. Please use the Sign In button.";
-      if (mapped) {
-        setAuthError(mapped);
-      }
-      console.error("Redirect sign-in failed:", error);
-    });
+    fetch("/api/ai-status")
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => setAiStatus(data.configured ? "online" : "error"))
+      .catch(() => setAiStatus("error"));
   }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const artifactId = params.get('artifact');
+    const artifactId = params.get("artifact");
     if (artifactId) {
       setIsLoadingArtifact(true);
-      getDoc(doc(db, 'artifacts', artifactId)).then(docSnap => {
-        if (docSnap.exists()) {
-          setSharedArtifact(docSnap.data().content);
-        }
-      }).catch(err => {
-        console.error("Failed to load artifact", err);
-      }).finally(() => {
-        setIsLoadingArtifact(false);
-      });
+      getDoc(doc(db, "artifacts", artifactId))
+        .then((docSnap) => {
+          if (docSnap.exists()) {
+            setSharedArtifact(docSnap.data().content);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to load artifact", err);
+        })
+        .finally(() => {
+          setIsLoadingArtifact(false);
+        });
     }
   }, []);
 
-  const categorizeGame = (commenceTime: string): 'previous' | 'today' | 'tomorrow' => {
-    // Shift game time and current time back by 10 hours (e.g. rollover at 6 AM ET)
-    // This prevents late-night West Coast games from disappearing into 'previous' at midnight PT.
-    const d = new Date(new Date(commenceTime).getTime() - 10 * 3600 * 1000);
-    const today = new Date(new Date().getTime() - 10 * 3600 * 1000);
-    const dDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    const tDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const diffDays = Math.round((dDay.getTime() - tDay.getTime()) / (1000 * 3600 * 24));
+  const categorizeGame = (
+    commenceTime: string,
+  ): "previous" | "today" | "tomorrow" => {
+    const timeZone = "America/Los_Angeles";
+    const d = new Date(commenceTime);
+    const now = new Date();
     
-    if (diffDays < 0) return 'previous';
-    if (diffDays === 0) return 'today';
-    return 'tomorrow';
+    const getPSTDateStr = (date: Date) => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).formatToParts(date);
+      console.log("Parts:", parts);
+      if (!Array.isArray(parts)) return "0000-00-00";
+      const y = parts.find(p => p && p.type === 'year')?.value;
+      const m = parts.find(p => p && p.type === 'month')?.value;
+      const d = parts.find(p => p && p.type === 'day')?.value;
+      return `${y}-${m}-${d}`;
+    };
+
+    const dStr = getPSTDateStr(d);
+    const todayStr = getPSTDateStr(now);
+    
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = getPSTDateStr(tomorrow);
+    
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = getPSTDateStr(yesterday);
+
+    if (dStr === todayStr) return "today";
+    if (dStr === tomorrowStr) return "tomorrow";
+    if (dStr === yesterdayStr) return "previous";
+    if (d < now) return "previous";
+    
+    return "tomorrow"; // Default for future
   };
 
-  const allGamesSorted = [...odds].sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime());
+  const allGamesSorted = [...odds].sort(
+    (a, b) =>
+      new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime(),
+  );
 
-  const liveGames = allGamesSorted.filter(o => o.status === 'live');
-  const upcomingGames = allGamesSorted.filter(o => o.status === 'upcoming' || !o.status);
-  const finalGames = allGamesSorted.filter(o => o.status === 'final').sort((a, b) => new Date(b.commence_time).getTime() - new Date(a.commence_time).getTime());
+  const liveGames = allGamesSorted.filter((o) => o.status === "live");
+  const upcomingGames = allGamesSorted.filter(
+    (o) => o.status === "upcoming" || !o.status,
+  );
+  const finalGames = allGamesSorted
+    .filter((o) => o.status === "final")
+    .sort(
+      (a, b) =>
+        new Date(b.commence_time).getTime() -
+        new Date(a.commence_time).getTime(),
+    );
   const featuredGames = [...liveGames, ...upcomingGames].slice(0, 3);
-  
-  const previousGames = allGamesSorted.filter(o => categorizeGame(o.commence_time) === 'previous');
-  let todayGames = allGamesSorted.filter(o => categorizeGame(o.commence_time) === 'today');
-  
+
+  const previousGames = allGamesSorted.filter(
+    (o) => categorizeGame(o.commence_time) === "previous",
+  );
+  let todayGames = allGamesSorted.filter(
+    (o) => categorizeGame(o.commence_time) === "today",
+  );
+
   // Sort live games first in today's games
   todayGames = [...todayGames].sort((a, b) => {
-    if (a.status === 'live' && b.status !== 'live') return -1;
-    if (a.status !== 'live' && b.status === 'live') return 1;
+    if (a.status === "live" && b.status !== "live") return -1;
+    if (a.status !== "live" && b.status === "live") return 1;
     return 0; // maintain time sort otherwise since allGamesSorted is already sorted by time
   });
 
-  const tomorrowGames = allGamesSorted.filter(o => categorizeGame(o.commence_time) === 'tomorrow');
+  const tomorrowGames = allGamesSorted.filter(
+    (o) => categorizeGame(o.commence_time) === "tomorrow",
+  );
 
-  const fullSlate = slateFilter === 'previous' ? previousGames : 
-                    slateFilter === 'tomorrow' ? tomorrowGames : todayGames;
+  const baseDateSlate =
+    slateFilter === "previous"
+      ? previousGames
+      : slateFilter === "tomorrow"
+        ? tomorrowGames
+        : todayGames;
+
+  const baseSlate = baseDateSlate.filter((game) => {
+     if (gameStatusFilter === "all") return true;
+     if (gameStatusFilter === "live") return game.status === "live";
+     if (gameStatusFilter === "ended") return game.status === "final";
+     if (gameStatusFilter === "pregame") return game.status === "upcoming" || !game.status;
+     return true;
+  });
+
+  const sourceFilteredSlate = baseSlate.map(game => ({
+     ...game,
+     bookmakers: game.bookmakers.filter(b => 
+       oddsSource === "prediction" ? b.key === "kalshi" : b.key !== "kalshi"
+     )
+  }));
+
+  const allBookmakers = Array.from(
+    new Set(sourceFilteredSlate.flatMap((o) => o.bookmakers.map((b) => b.title))),
+  ).sort();
+
+  const fullSlate = sourceFilteredSlate.filter((game) => {
+    // 1. Bookmaker Filter
+    let hasBookie = true;
+    if (selectedBookie !== "All Bookmakers") {
+      hasBookie = game.bookmakers.some((b) => b.title === selectedBookie);
+    }
+    if (!hasBookie) return false;
+
+    // Get the bookie data we'll use for market/odds filtering
+    const bookie =
+      selectedBookie === "All Bookmakers"
+        ? game.bookmakers[0]
+        : game.bookmakers.find((b) => b.title === selectedBookie);
+
+    // If a specific filter is set, and there's no bookie, hide it. However, if no specific filters are set, we can show it even without odds
+    if (!bookie && (selectedMarket !== "all" || minOdds !== "" || maxOdds !== "")) {
+        return false;
+    }
+
+    if (bookie) {
+      // 2. Market Filter
+      if (selectedMarket !== "all") {
+        const hasMarket = bookie.markets.some((m) => m.key === selectedMarket);
+        if (!hasMarket) return false;
+      }
+
+      // 3. Odds Range Filter
+      if (minOdds !== "" || maxOdds !== "") {
+        const min = minOdds === "" ? -Infinity : parseFloat(minOdds);
+        const max = maxOdds === "" ? Infinity : parseFloat(maxOdds);
+
+        // Check if ANY outcome in ANY market matches the range
+        const matchesRange = bookie.markets.some((m) => {
+          // If a specific market is selected, only check that one
+          if (selectedMarket !== "all" && m.key !== selectedMarket) return false;
+
+          return m.outcomes.some((o) => {
+            const price =
+              typeof o.price === "string" ? parseFloat(o.price) : o.price;
+            return price >= min && price <= max;
+          });
+        });
+
+        if (!matchesRange) return false;
+      }
+    }
+
+    return true;
+  });
 
   const getSuggestions = () => {
     switch (groundingMode) {
-      case 'live':
-        return ["Score on Dodgers game", "Late scratches tonight", "Weather at Wrigley"];
-      case 'stats':
-        return ["Record on Yankees vs LHP", "Cole's last 5 starts", "Padres home L10"];
-      case 'trends':
-        return ["Where's the line moved?", "Best edge tonight", "Unders trending"];
+      case "live":
+        return [
+          "Score on Dodgers game",
+          "Late scratches tonight",
+          "Weather at Wrigley",
+        ];
+      case "stats":
+        return [
+          "Record on Yankees vs LHP",
+          "Cole's last 5 starts",
+          "Padres home L10",
+        ];
+      case "trends":
+        return [
+          "Where's the line moved?",
+          "Best edge tonight",
+          "Unders trending",
+        ];
       default:
-        return ["Read on Dodgers Astros", "Best play tonight", "Totals trending under"];
+        return [
+          "Read on Dodgers Astros",
+          "Best play tonight",
+          "Totals trending under",
+        ];
     }
   };
 
-  const toggleMode = (mode: 'live' | 'stats' | 'trends') => {
-    setGroundingMode(prev => prev === mode ? null : mode);
+  const toggleMode = (mode: "live" | "stats" | "trends") => {
+    setGroundingMode((prev) => (prev === mode ? null : mode));
   };
 
   // 1. Auth Listener
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      
+      setAuthInitialized(true);
+
       if (u) {
-        setAuthError(null);
         try {
-          const userRef = doc(db, 'users', u.uid);
+          const userRef = doc(db, "users", u.uid);
           const userSnap = await getDoc(userRef);
-          const today = new Date().toISOString().split('T')[0];
-          
+          const today = new Date().toISOString().split("T")[0];
+
           if (!userSnap.exists()) {
             const newUserData: UserData = {
               userId: u.uid,
-              email: u.email || '',
-              displayName: u.displayName || 'Punter',
+              email: u.email || "",
+              displayName: u.displayName || "Punter",
               balance: 0,
-              planTier: 'free',
+              planTier: "free",
               queryCount: 0,
               lastQueryDate: today,
-              preferences: { favoriteLeagues: [], riskLevel: 'medium' }
+              preferences: { favoriteLeagues: [], riskLevel: "medium" },
             };
             await setDoc(userRef, newUserData);
             setUserData(newUserData);
           } else {
             const data = userSnap.data() as UserData;
-
             setUserData(data);
 
             if (data.lastQueryDate !== today) {
               await updateDoc(userRef, { queryCount: 0, lastQueryDate: today });
-              setUserData(prev => prev ? { ...prev, queryCount: 0, lastQueryDate: today } : prev);
+              setUserData((prev) =>
+                prev ? { ...prev, queryCount: 0, lastQueryDate: today } : prev,
+              );
             }
           }
 
-          // Setup Chat Listener without orderBy to avoid missing index errors
+          // Setup Chat Listener
           const q = query(
-            collection(db, 'users', u.uid, 'chats')
+            collection(db, "users", u.uid, "chats"),
+            orderBy("timestamp", "asc"),
           );
           onSnapshot(q, (snapshot) => {
-            const msgs = snapshot.docs.map(d => d.data() as any);
-            // Sort locally
-            msgs.sort((a, b) => {
-              const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : Date.now();
-              const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : Date.now();
-              return aTime - bTime;
-            });
-            setMessages(msgs as ChatMessage[]);
-          }, (err) => {
-            console.error("Chat listener failed:", err);
+            setMessages(snapshot.docs.map((d) => d.data() as ChatMessage));
           });
 
           // Setup Artifacts Listener
           try {
             const qArtifacts = query(
-              collection(db, 'artifacts'),
-              where('creatorId', '==', u.uid)
+              collection(db, "artifacts"),
+              where("creatorId", "==", u.uid),
             );
             onSnapshot(qArtifacts, (snapshot) => {
-              const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ArtifactMeta));
-              list.sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+              const list = snapshot.docs.map(
+                (d) => ({ id: d.id, ...d.data() }) as ArtifactMeta,
+              );
+              list.sort(
+                (a, b) =>
+                  (b.createdAt?.toMillis() || 0) -
+                  (a.createdAt?.toMillis() || 0),
+              );
               setArtifactsList(list);
             });
-          } catch(e) {
+          } catch (e) {
             console.error("Error setting up artifacts listener:", e);
           }
         } catch (error) {
@@ -406,24 +698,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
-
-  useEffect(() => {
-    const closeMenuOnOutsidePointer = (event: MouseEvent | TouchEvent) => {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(event.target as Node)) {
-        setIsUserMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', closeMenuOnOutsidePointer);
-    document.addEventListener('touchstart', closeMenuOnOutsidePointer);
-    return () => {
-      document.removeEventListener('mousedown', closeMenuOnOutsidePointer);
-      document.removeEventListener('touchstart', closeMenuOnOutsidePointer);
-    };
-  }, []);
 
   const refreshOdds = async () => {
     setIsLoadingOdds(true);
@@ -433,67 +709,87 @@ export default function App() {
     setIsLoadingOdds(false);
   };
 
-  const handleLogin = async () => {
-    setAuthError(null);
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    try {
-      await setPersistence(auth, browserLocalPersistence);
-      await signInWithPopup(auth, provider);
-      return;
-    } catch (error: any) {
-      const code = typeof error?.code === 'string' ? error.code : '';
-      const mappedMessage = code ? buildAuthErrorMessage(code) : "Sign-in failed. Please try again.";
-      const shouldFallbackToRedirect = [
-        'auth/popup-blocked',
-        'auth/popup-closed-by-user',
-        'auth/cancelled-popup-request',
-        'auth/web-storage-unsupported',
-        'auth/operation-not-supported-in-this-environment',
-      ].includes(code);
-
-      if (shouldFallbackToRedirect) {
-        const redirectMessage = code ? buildAuthErrorMessage(code) : "Switching to redirect sign-in.";
-        setAuthError(redirectMessage);
-        signInWithRedirect(auth, provider).catch((redirectError) => {
-          const redirectCode = typeof (redirectError as { code?: unknown }).code === 'string'
-            ? (redirectError as { code: string }).code
-            : "";
-          const mappedRedirectMessage = redirectCode ? buildAuthErrorMessage(redirectCode) : "Redirect sign-in failed. Please retry.";
-          setAuthError(mappedRedirectMessage);
-          console.error("Sign-in redirect failed:", redirectError);
-        });
-        return;
-      }
-      if (code) {
-        setAuthError(mappedMessage);
-      }
-      console.error("Sign-in failed:", error);
-    }
+  const handleLogin = () => {
+    signInWithPopup(auth, new GoogleAuthProvider());
   };
 
   const handleLogout = () => signOut(auth);
 
+  const handleVoiceToggle = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        alert("Speech recognition not supported in this browser.");
+        return;
+    }
+
+    if (isListening) {
+        setIsListening(false);
+    } else {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.onresult = (event: any) => {
+            const transcript = Array.from(event.results)
+                .map((result: any) => result[0])
+                .map(result => result.transcript)
+                .join("");
+            setInputText(transcript);
+        };
+        recognition.onend = () => setIsListening(false);
+        recognition.start();
+        setIsListening(true);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    console.log("File selected:", file);
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataBase64 = (reader.result as string).split(',')[1];
+            console.log("File type:", file.type);
+            setAttachment({
+                name: file.name,
+                type: file.type || 'application/octet-stream',
+                data: dataBase64
+            });
+        };
+        reader.readAsDataURL(file);
+    }
+  };
+
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
   const sendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim()) return;
-    if (!user) {
-      await handleLogin();
+    console.log("Sending message...", { inputText, attachment });
+    if ((!inputText.trim() && !attachment) || !user) return;
+
+    // Use default tier if userData didn't load properly yet
+    const planTier = userData?.planTier || "free";
+    const queryCount = userData?.queryCount || 0;
+
+    if (planTier === "free" && queryCount >= 100) {
+      setShowUpgradeModal(true);
       return;
     }
 
-    const queryCount = userData?.queryCount || 0;
+    const messageParts: (string | { inlineData: { data: string, mimeType: string } })[] = [];
+    if (inputText.trim()) messageParts.push(inputText.trim());
+    if (attachment) messageParts.push({ inlineData: { data: attachment.data, mimeType: attachment.type } });
 
-    const userMessage: ChatMessage = { role: 'user', text: inputText };
-    setInputText('');
-    
-    // Optimistic UI for chat is handled by Firestore listener 
+    const userMessage: ChatMessage = { role: "user", text: inputText.trim() || "[Attachment]" };
+    setInputText("");
+    setAttachment(null);
+
+    // Optimistic UI for chat is handled by Firestore listener
     // but we add locally for faster feel if needed or just wait for Firestore
     try {
       if (userData) {
         try {
-          await updateDoc(doc(db, 'users', user.uid), {
-            queryCount: queryCount + 1
+          await updateDoc(doc(db, "users", user.uid), {
+            queryCount: queryCount + 1,
           });
           setUserData({ ...userData, queryCount: queryCount + 1 });
         } catch (e) {
@@ -501,997 +797,1550 @@ export default function App() {
         }
       }
 
-      await addDoc(collection(db, 'users', user.uid, 'chats'), {
+      await addDoc(collection(db, "users", user.uid, "chats"), {
         ...userMessage,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
       });
 
       setIsTyping(true);
-      const insights = await getBettingInsights(inputText, messages, odds, groundingMode);
-      
-      await addDoc(collection(db, 'users', user.uid, 'chats'), {
-        role: 'model',
+      const insights = await getBettingInsights(
+        messageParts,
+        messages,
+        odds,
+        groundingMode,
+      );
+
+      await addDoc(collection(db, "users", user.uid, "chats"), {
+        role: "model",
         text: insights,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
       });
     } catch (err: any) {
       console.error(err);
-      
-      let errorMsg = "Couldn't pull data. Try refresh.";
+
+      let errorMsg = "Couldn't pull current data. Tap to retry.";
       if (err instanceof Error) {
-        if (err.message.includes('Quota exceeded')) errorMsg = "Quota exceeded. Please check limits.";
-        else if (err.message.includes('Missing or insufficient permissions')) errorMsg = "Permission denied. Please try again.";
+        if (err.message.includes("Quota exceeded"))
+          errorMsg = "Data limit reached for today. Please try again later.";
+        else if (err.message.includes("Missing or insufficient permissions") || err.message.includes("forbidden"))
+          errorMsg = "Market access synchronization failed. Tap to reconnect.";
       }
-      
-      await addDoc(collection(db, 'users', user.uid, 'chats'), {
-        role: 'model',
-        text: `*${errorMsg}*`,
-        timestamp: serverTimestamp()
-      }).catch(e => {
+
+      await addDoc(collection(db, "users", user.uid, "chats"), {
+        role: "model",
+        text: `### ⚠️ Connection Interrupted\n\n${errorMsg}`,
+        timestamp: serverTimestamp(),
+      }).catch((e) => {
         console.error("Could not write error to chat", e);
       });
-      
     } finally {
       setIsTyping(false);
     }
   };
 
+  const handleLedgerUpload = async (file: File | null) => {
+    if (!file) return;
+    setLedgerFile(file);
+    
+    const previewUrl = URL.createObjectURL(file);
+    setLedgerPreview(previewUrl);
+    setLedgerAnalysis(null);
+    setIsAnalyzingLedger(true);
+
+    try {
+      const context = userData ? `User is on ${userData.planTier} tier. Has ${userData.queryCount} queries.` : "Guest user.";
+      const analysis = await analyzeBetSlip(file, context);
+      setLedgerAnalysis(analysis);
+    } catch (e) {
+      setLedgerAnalysis("Failed to analyze image. Please try again.");
+    } finally {
+      setIsAnalyzingLedger(false);
+    }
+  };
+
   if (isLoadingArtifact) {
-    return <div className="min-h-[100dvh] w-full flex items-center justify-center bg-paper text-zinc-500 font-mono text-sm uppercase tracking-widest animate-pulse">Loading Artifact...</div>;
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-paper text-zinc-500 font-mono text-sm uppercase tracking-widest animate-pulse">
+        Loading Artifact...
+      </div>
+    );
   }
 
   if (sharedArtifact) {
     return (
-      <div className="min-h-[100dvh] w-full bg-zinc-100 flex flex-col items-center overflow-auto px-4 py-8 safe-area-bottom">
-        <div className="w-full max-w-[850px] flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+      <div className="h-full w-full bg-zinc-100 flex flex-col items-center overflow-auto py-12">
+        <div className="w-full max-w-[850px] flex items-center justify-between mb-4 px-6 xl:px-0">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 flex items-center justify-center font-serif italic text-xl font-medium text-brand select-none leading-none">B</div>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Document Artifact</span>
+            <div className="w-6 h-6 flex items-center justify-center font-serif italic text-xl font-medium text-brand select-none leading-none">
+              B
+            </div>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+              Document Artifact
+            </span>
           </div>
-          <button 
-             onClick={() => window.location.href = window.location.origin}
-             className="text-[11px] font-medium text-brand px-4 py-2 border border-brand/20 bg-brand/5 rounded-full hover:bg-brand/10 transition-colors"
+          <button
+            onClick={() => (window.location.href = window.location.origin)}
+            className="text-[11px] font-medium text-brand px-4 py-2 border border-brand/20 bg-brand/5 rounded-full hover:bg-brand/10 transition-colors"
           >
             Create Your Own
           </button>
         </div>
-        <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[70dvh]">
-          <iframe 
-            srcDoc={sharedArtifact} 
-            className="w-full h-full min-h-[70dvh] border-none"
-            sandbox=""
-            referrerPolicy="no-referrer"
+        <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[800px]">
+          <iframe
+            srcDoc={sharedArtifact}
+            className="w-full h-full min-h-[800px] border-none"
+            sandbox="allow-scripts allow-same-origin"
           />
         </div>
       </div>
     );
   }
 
-  // Adjust active tab if no user — only block artifacts since it depends on user.uid query
+  // Adjust active tab if no user
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+            e.preventDefault();
+            setIsSlateOpen(prev => !prev);
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+}, []);
+
   React.useEffect(() => {
-    if (!user && activeTab === 'artifacts') {
-      setActiveTab('odds');
+    if (
+      !user &&
+      (activeTab === "analysis" || activeTab === "ledger" || activeTab === "market")
+    ) {
+      setActiveTab("board");
     }
   }, [user, activeTab]);
 
-  const isMobileChatScreen = location.pathname === '/' && activeTab === 'chat';
+  if (!authInitialized) {
+    return (
+      <div className="flex h-[100dvh] w-full items-center justify-center bg-paper text-brand">
+        <Activity size={32} className="animate-spin" />
+      </div>
+    );
+  }
 
-  React.useEffect(() => {
-    setIsMobileTabMenuOpen(false);
-  }, [activeTab]);
+  if (!user) {
+    return (
+      <div className="flex h-[100dvh] w-full items-center justify-center bg-paper text-ink selection:bg-brand/10 selection:text-ink relative overflow-hidden">
+        {/* Subtle Ambient Bleed */}
+        <div className="ambient-blob ambient-blob-1"></div>
+        <div className="ambient-blob ambient-blob-2"></div>
+        <div className="ambient-blob ambient-blob-3"></div>
+        <div className="absolute inset-0 bg-paper/60 backdrop-blur-[100px] z-0 pointer-events-none" />
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative z-10 w-full max-w-sm px-6 text-center space-y-8"
+        >
+          <div className="w-16 h-16 mx-auto flex items-center justify-center font-serif italic text-5xl font-medium text-brand select-none mb-6">
+            B
+          </div>
+          <div className="space-y-2">
+             <h1 className="text-3xl font-serif font-bold text-ink">Baseline</h1>
+             <p className="text-zinc-500 font-mono text-sm tracking-wide">Institution-level market intelligence.</p>
+          </div>
+          
+          <div className="pt-8">
+            <button
+              onClick={handleLogin}
+              className="w-full bg-ink hover:bg-brand text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-colors py-4 flex items-center justify-center gap-2"
+            >
+              Sign In with Google
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex min-h-[100dvh] bg-paper text-ink font-sans overflow-hidden relative">
+    <div className="flex h-[100dvh] w-full bg-paper text-ink font-sans overflow-hidden relative selection:bg-brand/10 selection:text-ink [touch-action:pan-y]">
+      <CommandCenterModal 
+        isMenuOpen={isMenuOpen} 
+        setIsMenuOpen={setIsMenuOpen} 
+        setActiveTab={setActiveTab} 
+        navigate={navigate}
+        slateFilter={slateFilter}
+        setSlateFilter={setSlateFilter}
+        gameStatusFilter={gameStatusFilter}
+        setGameStatusFilter={setGameStatusFilter}
+        oddsSource={oddsSource}
+        setOddsSource={setOddsSource}
+        setSelectedBookie={setSelectedBookie}
+      />
       {/* Subtle Ambient Bleed */}
       <div className="ambient-blob ambient-blob-1"></div>
       <div className="ambient-blob ambient-blob-2"></div>
       <div className="ambient-blob ambient-blob-3"></div>
       <div className="absolute inset-0 bg-paper/60 backdrop-blur-[100px] z-0 pointer-events-none" />
 
-      <div className="flex h-full w-full z-10 relative">
-      {/* Primary Global Navigation */}
-      <aside className="hidden md:flex w-16 flex-col items-center py-8 border-r border-zinc-200 bg-paper shrink-0 z-30">
-        <div className="mb-10">
-          <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none">B</div>
-        </div>
-        
-        <nav className="flex flex-col gap-6 flex-1">
-            <SideNavIcon 
-              active={activeTab === 'chat'} 
-              onClick={() => setActiveTab('chat')}
-              icon={<MessageSquare size={20} strokeWidth={1.5} />}
-            />
-          <SideNavIcon 
-            active={activeTab === 'odds'} 
-            onClick={() => setActiveTab('odds')}
-            icon={<TrendingUp size={20} strokeWidth={1.5} />}
-          />
-              <SideNavIcon 
-                active={activeTab === 'ledger'} 
-                onClick={() => setActiveTab('ledger')}
-                icon={<BarChart size={20} strokeWidth={1.5} />}
-              />
-              <SideNavIcon 
-                active={activeTab === 'wallet'} 
-                onClick={() => setActiveTab('wallet')}
-                icon={<Calendar size={20} strokeWidth={1.5} />}
-              />
-              <SideNavIcon 
-                active={activeTab === 'artifacts'} 
-                onClick={() => user ? setActiveTab('artifacts') : handleLogin()}
-                icon={<FileText size={20} strokeWidth={1.5} />}
-              />
-        </nav>
-
-        <div className="mt-auto flex flex-col gap-6 items-center">
-          <button onClick={() => setShowAboutModal(true)} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50/80 transition-all duration-300">
-            <Info size={20} strokeWidth={1.5} />
-          </button>
-          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-brand hover:bg-brand/10 transition-all duration-300 mb-2">
-            <Zap size={20} strokeWidth={1.5} />
-          </button>
-        </div>
-      </aside>
-
-      {/* About Modal */}
-      <AnimatePresence>
-        {showAboutModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-paper/80 backdrop-blur-sm overflow-y-auto">
-             <motion.div 
-               initial={{ opacity: 0, scale: 0.95 }}
-               animate={{ opacity: 1, scale: 1 }}
-               exit={{ opacity: 0, scale: 0.95 }}
-               className="bg-white border border-zinc-200 shadow-xl rounded-2xl p-8 max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto relative"
-             >
-               <button 
-                 onClick={() => setShowAboutModal(false)}
-                 className="absolute top-6 right-6 text-zinc-500 hover:text-ink"
-               >
-                 <X size={20} strokeWidth={1.5} />
-               </button>
-               <div className="w-10 h-10 bg-brand/10 text-brand rounded-full flex items-center justify-center mb-6">
-                 <Info size={20} strokeWidth={1.5} />
-               </div>
-               <h3 className="text-2xl font-serif font-medium text-ink tracking-tight mb-4">About Baseline</h3>
-               <div className="space-y-4 text-sm text-zinc-600 leading-relaxed">
-                 <p>
-                   Baseline connects generative AI directly to real-time sports market data. 
-                 </p>
-                 <div className="space-y-2">
-                   <p><strong className="text-ink">Modes:</strong></p>
-                   <ul className="list-disc pl-4 space-y-1">
-                     <li><strong>Live:</strong> Real-time scores, innings, odds shifts.</li>
-                     <li><strong>Stats:</strong> Pitcher metrics, team splits, historicals.</li>
-                     <li><strong>Trends:</strong> Line movement and market sentiment.</li>
-                   </ul>
-                 </div>
-                 <p>
-                   Use the chat or tap a game card to explore deep-dive analytics for any matchup. ESPN checks all game-level context in-session.
-                 </p>
-                 <div className="pt-4 border-t border-zinc-100 space-y-2">
-                   Feedback? <a href="mailto:hello@baseline.com" className="text-brand hover:underline">hello@baseline.com</a>
-                   <p><a href={APP_SHELL_LINKS.privacyPolicyUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">Privacy Policy</a></p>
-                   <p><a href={APP_SHELL_LINKS.termsOfServiceUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">Terms of Service</a></p>
-                   <p><a href={APP_SHELL_LINKS.appSupportUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">App Support</a></p>
-                   <p className="text-xs text-zinc-500">{IOS_WRAPPER_NOTE}</p>
-                 </div>
-               </div>
-             </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-paper safe-area-bottom relative">
-        {/* Unified Header */}
-        <header className={cn(
-          "h-16 items-center justify-between px-4 sm:px-6 xl:px-10 border-b border-zinc-100/80 bg-paper/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20 safe-area-top",
-          isMobileChatScreen ? "hidden md:flex" : "flex"
-        )}>
-          <div className="flex items-center gap-4 sm:gap-6">
-            <button
-              type="button"
-              onClick={() => setIsMobileTabMenuOpen((prev) => !prev)}
-              className="md:hidden w-10 h-10 rounded-full border border-zinc-200 bg-white/90 text-zinc-700 flex items-center justify-center"
-              aria-label="Open navigation menu"
-            >
-              <Menu size={18} />
-            </button>
-            {location.pathname !== '/' && (
-              <h1 className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">
-                {location.pathname === '/pricing' ? 'Upgrade' : 'Daily Board'}
-              </h1>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-3 sm:gap-6">
-            {authError ? (
-              <p className="text-[11px] text-amber-700 max-w-[320px] text-right leading-snug">
-                {authError}
-              </p>
-            ) : null}
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-medium hidden sm:inline-block">
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: '2-digit' }).toUpperCase()}
-            </span>
-            {user ? (
-              <div className="flex items-center gap-4 relative" ref={userMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setIsUserMenuOpen((prev) => !prev)}
-                  className="w-9 h-9 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center overflow-hidden cursor-pointer focus-visible:outline-none"
-                  aria-label="Open account menu"
-                  aria-expanded={isUserMenuOpen}
-                >
-                  {user.photoURL ? <img src={user.photoURL} alt="" /> : <UserIcon size={12} className="text-zinc-500" />}
-                </button>
-                <div className={cn(
-                  "absolute right-0 top-full mt-2 w-52 bg-white border border-zinc-100 shadow-xl rounded-lg py-2 z-50",
-                  isUserMenuOpen ? "block" : "hidden"
-                )}>
-                   <div className="px-4 py-2 border-b border-zinc-50 mb-2">
-                     <p className="text-xs font-bold text-ink truncate">{user.email}</p>
-                   </div>
-                   <button onClick={() => { setIsUserMenuOpen(false); navigate('/pricing'); }} className="w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
-                     <Zap size={14} className="text-brand" /> Manage Subscription
-                   </button>
-                   <button onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} className="w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
-                     <LogOut size={14} /> Sign out
-                   </button>
-                </div>
-              </div>
-            ) : (
-              <button onClick={handleLogin} className="bg-ink hover:bg-brand text-white text-xs font-bold uppercase tracking-widest px-5 py-2.5 rounded-full transition-all hover:shadow-lg hover:shadow-brand/20 active:scale-[0.98]">
-                Sign In
-              </button>
-            )}
-          </div>
-        </header>
-
+      <div className="flex flex-col xl:flex-row h-full w-full z-10 relative overflow-y-auto xl:overflow-hidden overscroll-none">
         <AnimatePresence>
-          {isMobileTabMenuOpen && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="md:hidden fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
-              onClick={() => setIsMobileTabMenuOpen(false)}
-            >
+          {showUpgradeModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-paper/80 backdrop-blur-sm">
               <motion.div
-                initial={{ x: -24, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: -24, opacity: 0 }}
-                transition={{ duration: 0.16 }}
-                className="absolute left-3 right-3 top-[max(0.75rem,env(safe-area-inset-top))] bg-white border border-zinc-200 rounded-2xl shadow-xl p-3"
-                onClick={(event) => event.stopPropagation()}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="max-w-md w-full bg-white border border-zinc-100 rounded-2xl shadow-xl overflow-hidden p-8 flex flex-col items-center text-center relative"
               >
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <button type="button" onClick={() => { setActiveTab('chat'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'chat' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Chat</button>
-                  <button type="button" onClick={() => { setActiveTab('odds'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'odds' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Daily Board</button>
-                  <button type="button" onClick={() => { setActiveTab('ledger'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'ledger' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Ledger</button>
-                  <button type="button" onClick={() => { setActiveTab('wallet'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'wallet' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Schedule</button>
-                  <button type="button" onClick={() => { user ? setActiveTab('artifacts') : handleLogin(); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'artifacts' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Artifacts</button>
-                  <button type="button" onClick={() => { navigate('/pricing'); setIsMobileTabMenuOpen(false); }} className="rounded-xl px-3 py-3 text-left text-sm border border-zinc-200 text-zinc-700">Pricing</button>
+                <button
+                  onClick={() => setShowUpgradeModal(false)}
+                  className="absolute top-6 right-6 text-zinc-400 hover:text-ink"
+                >
+                  <AlertCircle size={16} />
+                </button>
+                <div className="w-16 h-16 rounded-full bg-brand/10 text-brand flex items-center justify-center mb-6">
+                  <Zap size={24} />
                 </div>
-                <div className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-3">
-                  <button type="button" onClick={() => { setShowAboutModal(true); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">About</button>
-                  {user ? (
-                    <button type="button" onClick={() => { handleLogout(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">Sign Out</button>
-                  ) : (
-                    <button type="button" onClick={() => { handleLogin(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">Sign In</button>
-                  )}
-                </div>
+                <h3 className="text-2xl font-serif font-bold text-ink mb-2">
+                  You've hit the limit
+                </h3>
+                <p className="text-zinc-600 mb-8 max-w-[280px]">
+                  Free accounts are limited to 100 AI queries per day. Upgrade
+                  to Pro for unlimited access and advanced tools.
+                </p>
+                <button
+                  onClick={() => {
+                    setShowUpgradeModal(false);
+                    navigate("/pricing");
+                  }}
+                  className="w-full py-4 bg-brand hover:bg-[#1E3027] text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-colors"
+                >
+                  View Plans
+                </button>
               </motion.div>
-            </motion.div>
+            </div>
           )}
         </AnimatePresence>
 
-        <div className="flex-1 flex flex-col xl:flex-row overflow-hidden relative">
-          <div className="flex-1 flex flex-col min-w-0 xl:border-r border-zinc-100 relative">
-             <Routes>
-               <Route path="/" element={
-                 <AnimatePresence mode="wait">
-              {activeTab === 'chat' && (
-                <motion.div 
-                  key="chat"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full flex flex-col max-w-5xl mx-auto w-full"
+        {/* About Modal */}
+        <AnimatePresence>
+          {showAboutModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-paper/80 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white border border-zinc-200 shadow-xl rounded-2xl p-8 max-w-md w-full relative"
+              >
+                <button
+                  onClick={() => setShowAboutModal(false)}
+                  className="absolute top-6 right-6 text-zinc-400 hover:text-ink"
                 >
-                  <div className="md:hidden px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 border-b border-zinc-100/80 bg-paper/90 backdrop-blur-sm sticky top-0 z-20">
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsMobileTabMenuOpen((prev) => !prev)}
-                        className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
-                        aria-label="Open navigation menu"
-                      >
-                        <Menu size={19} />
-                      </button>
-                      <div className="px-5 h-11 rounded-full bg-white/95 border border-zinc-200 text-brand text-[15px] font-medium flex items-center justify-center min-w-[128px]">
-                        {isTyping ? "Thinking" : "Baseline"}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInputText('');
-                            setGroundingMode(null);
-                            setActiveTab('chat');
-                          }}
-                          className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
-                          aria-label="New chat"
-                        >
-                          <PenSquare size={19} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowAboutModal(true)}
-                          className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
-                          aria-label="More actions"
-                        >
-                          <MoreHorizontal size={19} />
-                        </button>
-                      </div>
-                    </div>
+                  <X size={20} strokeWidth={1.5} />
+                </button>
+                <div className="w-10 h-10 bg-brand/10 text-brand rounded-full flex items-center justify-center mb-6">
+                  <Info size={20} strokeWidth={1.5} />
+                </div>
+                <h3 className="text-2xl font-serif font-medium text-ink tracking-tight mb-4">
+                  About Baseline
+                </h3>
+                <div className="space-y-4 text-sm text-zinc-600 leading-relaxed">
+                  <p>
+                    Baseline connects generative AI directly to real-time sports
+                    market data.
+                  </p>
+                  <div className="space-y-2">
+                    <p>
+                      <strong className="text-ink">Modes:</strong>
+                    </p>
+                    <ul className="list-disc pl-4 space-y-1">
+                      <li>
+                        <strong>Live:</strong> Real-time scores, innings, odds
+                        shifts.
+                      </li>
+                      <li>
+                        <strong>Stats:</strong> Pitcher metrics, team splits,
+                        historicals.
+                      </li>
+                      <li>
+                        <strong>Trends:</strong> Line movement and market
+                        sentiment.
+                      </li>
+                    </ul>
                   </div>
+                  <p>
+                    Use the chat or tap a game card to explore deep-dive
+                    analytics for any matchup. Data refreshed live via ESPN and
+                    The Odds API.
+                  </p>
+                  <p className="pt-4 border-t border-zinc-100">
+                    Feedback?{" "}
+                    <a
+                      href="mailto:hello@baseline.com"
+                      className="text-brand hover:underline"
+                    >
+                      hello@baseline.com
+                    </a>
+                  </p>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
-                  <div className="flex-1 px-4 sm:px-6 lg:px-10 xl:px-12 py-5 md:py-8 overflow-y-auto space-y-8 md:space-y-10 custom-scrollbar pb-36 md:pb-48">
-                    {messages.length === 0 && (
-                      <div className="pb-8 pt-4">
-                        <div className="mb-8">
-                          <h3 className="text-2xl serif-italic font-medium text-ink tracking-tight">
-                            Today's Slate
-                          </h3>
-                          {isLoadingOdds ? (
-                            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mt-2 flex items-center gap-2">
-                              <RefreshCw className="animate-spin" size={10} /> Hydrating...
-                            </p>
-                          ) : (
-                            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 mt-2">
-                              {todayGames.length} games · {liveGames.length} live
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-4 md:gap-5">
-                           {featuredGames.map(odd => (
-                             <button 
-                               key={odd.id} 
-                               onClick={() => {
-                                 setInputText(`Read on ${odd.away_team} @ ${odd.home_team}`);
-                                 setTimeout(() => {
-                                   (document.querySelector('input[type="text"]') as HTMLInputElement)?.focus();
-                                 }, 100);
-                               }}
-                               className="block w-full bg-white border border-zinc-200 p-4 sm:p-6 rounded-xl text-left hover:border-zinc-300 hover:shadow-sm transition-all group flex flex-col gap-4 relative overflow-hidden"
-                             >
-                                {odd.status === 'live' && (
-                                  <div className="absolute top-0 left-0 w-full h-1 bg-brand" />
-                                )}
-                                <div className="flex justify-between items-start">
-                                  <div>
-                                    <div className="flex items-center gap-2 mb-1">
-                                      {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
-                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{odd.sport_title} {odd.status === 'live' ? '• LIVE' : ''}</span>
-                                    </div>
-                                    <span className="text-xs font-mono text-zinc-500">{odd.venue || 'TBA'} • {new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                  </div>
-                                  <div className="text-right">
-                                    {(odd.status === 'live' && odd.score) ? (
-                                      <>
-                                        <div className="text-lg font-mono font-bold text-ink">{odd.score}</div>
-                                        <div className="text-xs text-brand font-medium">{odd.situation}</div>
-                                      </>
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col min-w-0 bg-paper pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0 overflow-hidden md:overflow-visible">
+          {/* Unified Header */}
+          <header className="h-16 flex items-center justify-between px-6 xl:px-12 border-b border-zinc-200/50 bg-white/70 backdrop-blur-3xl sticky top-0 z-30 transition-all">
+            <div className="flex items-center gap-8">
+                <button
+                    onClick={() => setIsMenuOpen(true)}
+                    className="md:hidden text-xs font-bold tracking-[0.2em] uppercase"
+                >
+                    Menu
+                </button>
+                <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none pointer-events-none">
+                    B
+                </div>
+                
+                <nav className="hidden md:flex items-center gap-6">
+                <button
+                  onClick={() => { navigate("/"); setActiveTab("board"); }}
+                  className={cn(
+                    "text-xs uppercase tracking-[0.2em] font-bold transition-colors",
+                    activeTab === "board" ? "text-ink" : "text-zinc-400 hover:text-zinc-600"
+                  )}
+                >
+                  Board
+                </button>
+                {user && (
+                  <button
+                    onClick={() => { navigate("/"); setActiveTab("analysis"); }}
+                    className={cn(
+                      "text-xs uppercase tracking-[0.2em] font-bold transition-colors",
+                      activeTab === "analysis" ? "text-ink" : "text-zinc-400 hover:text-zinc-600"
+                    )}
+                  >
+                    Analysis
+                  </button>
+                )}
+                <button
+                    onClick={() => { navigate("/"); setActiveTab("ledger"); }}
+                    className={cn( 
+                        "text-xs uppercase tracking-[0.2em] font-bold transition-colors",
+                        activeTab === "ledger" ? "text-ink" : "text-zinc-400 hover:text-zinc-600"
+                    )}
+                >
+                    Ledger
+                </button>
+                <button
+                    onClick={() => { navigate("/"); setActiveTab("market"); }}
+                    className={cn(
+                        "text-xs uppercase tracking-[0.2em] font-bold transition-colors",
+                        activeTab === "market" ? "text-ink" : "text-zinc-400 hover:text-zinc-600"
+                    )}
+                >
+                    Market
+                </button>
+                <button
+                    onClick={() => setIsSlateOpen(!isSlateOpen)}
+                    className={cn(
+                        "text-xs uppercase tracking-[0.2em] font-bold transition-colors",
+                        isSlateOpen ? "text-ink" : "text-zinc-400 hover:text-zinc-600"
+                    )}
+                >
+                    The Slate
+                </button>
+              </nav>
+            </div>
+
+            <div className="flex items-center gap-6">
+              <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-bold hidden sm:inline-block">
+                {new Date()
+                  .toLocaleDateString("en-US", {
+                    weekday: "long",
+                    month: "short",
+                    day: "2-digit",
+                    timeZone: "America/Los_Angeles",
+                  })
+                  .toUpperCase()}
+              </span>
+              <div className="flex items-center gap-4 relative group">
+                <div className="w-8 h-8 rounded-full bg-zinc-50 border border-zinc-200 shadow-sm flex items-center justify-center overflow-hidden cursor-pointer transition-transform hover:scale-105">
+                  {user.photoURL ? (
+                    <img src={user.photoURL} alt="" />
+                  ) : (
+                    <UserIcon size={12} className="text-zinc-500" />
+                  )}
+                </div>
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-zinc-100 shadow-[0_4px_20px_rgba(0,0,0,0.08)] rounded-xl py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible translate-y-1 group-hover:translate-y-0 transition-all duration-200 z-50">
+                  <div className="px-4 py-2 border-b border-zinc-100/60 mb-1">
+                    <p className="text-xs font-bold text-zinc-900 truncate">
+                      {user.email}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => navigate("/pricing")}
+                    className="w-full text-left px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 transition-colors flex items-center gap-2"
+                  >
+                    <Zap size={14} className="text-zinc-800" /> Manage
+                    Subscription
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 transition-colors flex items-center gap-2"
+                  >
+                    <LogOut size={14} /> Sign out
+                  </button>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="flex-1 flex flex-col overflow-hidden relative overscroll-contain no-scrollbar">
+            <div className="flex-1 flex flex-col min-w-0 relative overflow-hidden pb-[64px] xl:pb-0">
+              <Routes>
+                <Route
+                  path="/"
+                  element={
+                    <AnimatePresence mode="wait">
+                      {activeTab === "analysis" && (
+                        <motion.div
+                          key="analysis"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="h-full flex flex-col max-w-4xl mx-auto w-full overflow-x-hidden overscroll-x-none touch-pan-y"
+                        >
+                          <div className="flex-1 px-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto space-y-16 custom-scrollbar">
+                            {messages.length === 0 && (
+                              <div className="pb-12 pt-8">
+                                <div className="mb-8">
+                                  <h3 className="text-2xl serif-italic font-medium text-ink tracking-tight">
+                                    Today's Market
+                                  </h3>
+                                  <div className="flex items-center gap-4 mt-2">
+                                    {isLoadingOdds ? (
+                                      <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-400 flex items-center gap-2">
+                                        {""}
+                                          Hydrating...
+                                      </p>
                                     ) : (
-                                      <div className="text-[11px] text-zinc-500 serif italic bg-zinc-50 px-3 py-1 rounded-full border border-zinc-100">
-                                        {odd.context || 'Regular Season'}
-                                      </div>
+                                      <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">
+                                        {allGamesSorted.length} games ·{" "}
+                                        {liveGames.length} live
+                                      </p>
                                     )}
-                                  </div>
-                                </div>
-                                
-                                <div className="space-y-3">
-                                  {odd.bookmakers?.length ? (
-                                    <>
-                                      <div className="flex justify-between items-center">
-                                        <div className="flex items-center gap-4">
-                                          <img src={getEspnLogo(odd.away_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
-                                          <div>
-                                            <div className="font-medium text-lg text-ink serif">{odd.away_team}</div>
-                                          </div>
-                                        </div>
-                                        <div className="text-right flex items-center gap-4">
-                                          {odd.bookmakers?.[0]?.markets?.map(m => {
-                                            const outcome = m.outcomes.find(o => o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name) || o.name === 'Over');
-                                            if (!outcome) return null;
-                                            return (
-                                              <div key={m.key} className="flex flex-col items-end">
-                                                <span className="text-[9px] uppercase tracking-widest text-zinc-500 mb-0.5">{m.key === 'h2h' ? 'ML' : m.key === 'spreads' ? 'Spread' : 'Total'}</span>
-                                                <span className="font-mono text-sm text-ink font-medium">
-                                                  {m.key === 'totals' ? `O ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
-                                                </span>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                      
-                                      <div className="flex justify-between items-center">
-                                        <div className="flex items-center gap-4">
-                                          <img src={getEspnLogo(odd.home_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
-                                          <div>
-                                            <div className="font-medium text-lg text-ink serif">{odd.home_team}</div>
-                                          </div>
-                                        </div>
-                                        <div className="text-right flex items-center gap-4">
-                                          {odd.bookmakers?.[0]?.markets?.map(m => {
-                                            const outcome = m.outcomes.find(o => o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name) || o.name === 'Under');
-                                            if (!outcome) return null;
-                                            return (
-                                              <div key={m.key} className="flex flex-col items-end">
-                                                <span className="font-mono text-sm text-ink font-medium relative top-[14px]">
-                                                  {m.key === 'totals' ? `U ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
-                                                </span>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-4 py-3 text-[11px] uppercase tracking-widest text-zinc-500">
-                                      {describeOddsLine(odd) || "ESPN checked. Market line not found yet."}
-                                    </div>
-                                  )}
-                                </div>
-                                
-                                {/* Featured Pitcher Matchup */}
-                                {(odd.away_pitcher || odd.home_pitcher) && (
-                                  <div className="mt-4 pt-4 border-t border-zinc-100/60 transition-opacity">
-                                    <div className="flex items-center gap-2 mb-3">
-                                      <div className="w-1.5 h-1.5 rotate-45 bg-[#2D4A3E] shrink-0 opacity-80" />
-                                      <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Pitching Matchup</span>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                                      <PitcherDisplay 
-                                        teamFull={odd.away_team} 
-                                        name={odd.away_pitcher} 
-                                        headshot={odd.away_pitcher_headshot} 
-                                        record={odd.away_pitcher_record} 
-                                        small
-                                      />
-                                      <PitcherDisplay 
-                                        teamFull={odd.home_team} 
-                                        name={odd.home_pitcher} 
-                                        headshot={odd.home_pitcher_headshot} 
-                                        record={odd.home_pitcher_record} 
-                                        alignRight 
-                                        small
-                                      />
+                                    <div className="flex items-center gap-1.5 ml-auto">
+                                      <span className={cn(
+                                        "w-1.5 h-1.5 rounded-full",
+                                        aiStatus === "online" ? "bg-brand" : aiStatus === "checking" ? "bg-zinc-300 animate-pulse" : "bg-red-500"
+                                      )} />
+                                      <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-zinc-400">
+                                        AI Processor: {aiStatus}
+                                      </span>
                                     </div>
                                   </div>
+                                </div>
+                                <div className="flex flex-col gap-6">
+                                  {featuredGames.map((odd) => (
+                                    <button
+                                      key={odd.id}
+                                      onClick={() => {
+                                        const matchDate = new Date(odd.commence_time).toISOString().split('T')[0];
+                                        const homeSlug = odd.home_team.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                                        const awaySlug = odd.away_team.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                                        navigate(`/game/${matchDate}/${awaySlug}-at-${homeSlug}`);
+                                      }}
+                                      className="block w-full bg-white border border-zinc-200/60 p-6 md:p-8 rounded-[1.5rem] text-left hover:border-zinc-300 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300 group relative overflow-hidden"
+                                    >
+                                      {odd.status === "live" && (
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-red-500" />
+                                      )}
+                                      <div className="flex justify-between items-start mb-6">
+                                        <div>
+                                          <div className="flex items-center gap-2 mb-1.5">
+                                            {odd.status === "live" && (
+                                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                                            )}
+                                            <span className={cn("text-[10px] font-bold uppercase tracking-[0.2em]", odd.status === "live" ? "text-red-500" : "text-zinc-400 group-hover:text-zinc-500 transition-colors")}>
+                                              {odd.sport_title}{" "}
+                                              {odd.status === "live"
+                                                ? "• LIVE"
+                                                : ""}
+                                            </span>
+                                          </div>
+                                          <span className="text-xs font-mono text-zinc-500 group-hover:text-zinc-600 transition-colors">
+                                            {odd.venue || "TBA"} •{" "}
+                                            {new Date(
+                                              odd.commence_time,
+                                            ).toLocaleTimeString([], {
+                                              hour: "numeric",
+                                              minute: "2-digit",
+                                              timeZone: "America/Los_Angeles",
+                                            })}
+                                          </span>
+                                        </div>
+                                        <div className="text-right">
+                                          {odd.status === "live" &&
+                                          odd.score ? (
+                                            <div className="flex flex-col items-end">
+                                              <div className="text-xl font-mono font-bold text-zinc-900 tracking-tighter">
+                                                {odd.score}
+                                              </div>
+                                              <div className="text-[10px] text-red-500 font-bold uppercase tracking-widest mt-1">
+                                                {odd.situation}
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <div className="text-[10px] text-zinc-500 font-serif italic bg-zinc-50 px-3 py-1.5 rounded-full border border-zinc-200/60">
+                                              {odd.context || "Regular Season"}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-5">
+                                        <div className="flex justify-between items-center bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100 group-hover:border-zinc-200/60 transition-colors">
+                                          <div className="flex items-center gap-4">
+                                            <img
+                                              src={getEspnLogo(odd.away_team)}
+                                              className="w-10 h-10 md:w-12 md:h-12 rounded-full border border-zinc-200/50 bg-white shadow-sm p-1 transition-transform duration-500 group-hover:scale-110"
+                                              alt=""
+                                            />
+                                            <div>
+                                              <div className="font-medium text-lg md:text-xl text-zinc-900 serif tracking-tight">
+                                                {odd.away_team}
+                                              </div>
+                                              <div className="text-[10px] md:text-xs font-mono text-zinc-500 mt-0.5">
+                                                Away
+                                              </div>
+                                            </div>
+                                          </div>
+                                          <div className="text-right flex items-center gap-4">
+                                            {odd.bookmakers?.[0]?.markets?.map(
+                                              (m) => {
+                                                const outcome = m.outcomes.find(
+                                                  (o) =>
+                                                    o.name?.includes(
+                                                      odd.away_team,
+                                                    ) ||
+                                                    odd.away_team?.includes(
+                                                      o.name,
+                                                    ) ||
+                                                    o.name === "Over",
+                                                );
+                                                if (!outcome) return null;
+                                                return (
+                                                  <div
+                                                    key={m.key}
+                                                    className="flex flex-col items-end"
+                                                  >
+                                                    <span className="text-[9px] uppercase tracking-widest text-zinc-400 mb-1 group-hover:text-zinc-500 transition-colors">
+                                                      {m.key === "h2h"
+                                                        ? "ML"
+                                                        : m.key === "spreads"
+                                                          ? "Spread"
+                                                          : "Total"}
+                                                    </span>
+                                                    <OddsDisplay price={m.key === "totals"
+                                                        ? outcome.point
+                                                        : outcome.point
+                                                          ? outcome.point
+                                                          : outcome.price} />
+                                                  </div>
+                                                );
+                                              },
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex justify-between items-center bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100 group-hover:border-zinc-200/60 transition-colors">
+                                          <div className="flex items-center gap-4">
+                                            <img
+                                              src={getEspnLogo(odd.home_team)}
+                                              className="w-10 h-10 md:w-12 md:h-12 rounded-full border border-zinc-200/50 bg-white shadow-sm p-1 transition-transform duration-500 group-hover:scale-110"
+                                              alt=""
+                                            />
+                                            <div>
+                                              <div className="font-medium text-lg md:text-xl text-zinc-900 serif tracking-tight">
+                                                {odd.home_team}
+                                              </div>
+                                              <div className="text-[10px] md:text-xs font-mono text-zinc-500 mt-0.5">
+                                                Home
+                                              </div>
+                                            </div>
+                                          </div>
+                                          <div className="text-right flex items-center gap-4">
+                                            {odd.bookmakers?.[0]?.markets?.map(
+                                              (m) => {
+                                                const outcome = m.outcomes.find(
+                                                  (o) =>
+                                                    o.name?.includes(
+                                                      odd.home_team,
+                                                    ) ||
+                                                    odd.home_team?.includes(
+                                                      o.name,
+                                                    ) ||
+                                                    o.name === "Under",
+                                                );
+                                                if (!outcome) return null;
+                                                return (
+                                                  <div
+                                                    key={m.key}
+                                                    className="flex flex-col items-end opacity-0"
+                                                  >
+                                                    <span className="text-[9px] uppercase tracking-widest text-zinc-400 mb-1 group-hover:text-zinc-500 transition-colors">
+                                                      {m.key === "h2h"
+                                                        ? "ML"
+                                                        : m.key === "spreads"
+                                                          ? "Spread"
+                                                          : "Total"}
+                                                    </span>
+                                                    <OddsDisplay price={m.key === "totals"
+                                                        ? outcome.point
+                                                        : outcome.point
+                                                          ? outcome.point
+                                                          : outcome.price} />
+                                                  </div>
+                                                );
+                                              },
+                                            )}
+                                            {/* We need odds to display on the bottom */}
+                                            {odd.bookmakers?.[0]?.markets?.map(
+                                              (m) => {
+                                                const outcome = m.outcomes.find(
+                                                  (o) =>
+                                                    o.name?.includes(
+                                                      odd.home_team,
+                                                    ) ||
+                                                    odd.home_team?.includes(
+                                                      o.name,
+                                                    ) ||
+                                                    o.name === "Under",
+                                                );
+                                                if (!outcome) return null;
+                                                return (
+                                                  <div
+                                                    key={`actual-${m.key}`}
+                                                    className="absolute flex flex-col items-end"
+                                                  >
+                                                    <OddsDisplay price={m.key === "totals"
+                                                        ? outcome.point
+                                                        : outcome.point
+                                                          ? outcome.point
+                                                          : outcome.price} />
+                                                  </div>
+                                                );
+                                              },
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Featured Pitcher Matchup */}
+                                      {(odd.away_pitcher ||
+                                        odd.home_pitcher) && (
+                                        <div className="mt-6 pt-5 border-t border-zinc-200/40">
+                                          <div className="flex justify-center items-center gap-2 mb-4">
+                                            <span className="inline-flex items-center gap-2 px-3 py-1 bg-zinc-100 rounded-full text-[9px] uppercase tracking-[0.2em] font-bold text-zinc-500">
+                                              <div className="w-1.5 h-1.5 rounded bg-zinc-400" />
+                                              Pitching Matchup
+                                            </span>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-4">
+                                            <PitcherDisplay
+                                              teamFull={odd.away_team}
+                                              name={odd.away_pitcher}
+                                              headshot={
+                                                odd.away_pitcher_headshot
+                                              }
+                                              record={odd.away_pitcher_record}
+                                              small
+                                            />
+                                            <PitcherDisplay
+                                              teamFull={odd.home_team}
+                                              name={odd.home_pitcher}
+                                              headshot={
+                                                odd.home_pitcher_headshot
+                                              }
+                                              record={odd.home_pitcher_record}
+                                              alignRight
+                                              small
+                                            />
+                                          </div>
+                                        </div>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {messages.map((m, i) => (
+                              <ChatMessageItem key={i} m={m} />
+                            ))}
+                            {isTyping && (
+                              <div className="flex gap-4 items-center">
+                                <div className="w-1 h-1 bg-brand rounded-full animate-pulse" />
+                                <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-400">
+                                  Calculating...
+                                </span>
+                              </div>
+                            )}
+                            <div ref={chatEndRef} />
+                          </div>
+
+                          {/* Input Area */}
+                          <div className="p-2 pb-4 md:p-6 sticky bottom-2 md:bottom-4 z-20 flex justify-center">
+                            <div className="w-full max-w-2xl bg-white shadow-[0_4px_24px_rgba(0,0,0,0.04)] border border-zinc-200 rounded-[2rem] p-1.5 flex flex-col gap-2">
+                              {/* Modes */}
+                              <div className="flex gap-1">
+                                {(["live", "stats", "trends"] as const).map(
+                                  (mode) => {
+                                    const isActive = groundingMode === mode;
+                                    return (
+                                      <button
+                                        key={mode}
+                                        type="button"
+                                        onClick={() => toggleMode(mode)}
+                                        className={cn(
+                                          "flex-1 flex items-center justify-center transition-all text-[9px] rounded-full px-3 py-1.5 tracking-[0.1em] uppercase font-bold",
+                                          isActive
+                                            ? "bg-zinc-900 text-white"
+                                            : "bg-white text-zinc-400 hover:text-zinc-900",
+                                        )}
+                                      >
+                                        {mode}
+                                      </button>
+                                    );
+                                  },
                                 )}
-                             </button>
-                           ))}
+                              </div>
+                            {messages.length === 0 && (
+                              <div className="flex flex-wrap gap-2 mb-5">
+                                {getSuggestions().map((sug, idx) => (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => setInputText(sug)}
+                                    className="text-[11px] bg-zinc-50/80 border border-zinc-200/60 text-zinc-500 px-4 py-2.5 rounded-full hover:bg-white hover:text-zinc-900 hover:border-zinc-300 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-all duration-300"
+                                  >
+                                    {sug}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Actual Input Container */}
+                            <div className="sticky bottom-0 md:bottom-4 z-50 flex justify-center w-full px-2 md:px-0">
+                                <div className="w-full max-w-2xl bg-white/70 backdrop-blur-[16px] shadow-[0_4px_24px_rgba(0,0,0,0.06)] rounded-[24px] p-4 flex flex-col gap-2">
+                                    {attachment && (
+                                        <div className="bg-zinc-100 rounded-lg p-2 flex items-center gap-2 text-xs text-zinc-600">
+                                            <span>{attachment.name}</span>
+                                            <button onClick={() => setAttachment(null)} className="ml-auto hover:text-red-500">
+                                                <X size={14} />
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="flex items-end gap-3">
+                                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleFileChange} />
+                                        <button className="text-zinc-600 hover:text-zinc-900 p-1 shrink-0" onClick={() => fileInputRef.current?.click()}>
+                                            <Plus size={20} />
+                                        </button>
+                                        <textarea
+                                            value={inputText}
+                                            onChange={(e) => setInputText(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    sendMessage();
+                                                }
+                                            }}
+                                            className="flex-1 text-sm bg-transparent outline-none p-1 text-zinc-900 resize-none min-h-[24px] max-h-32"
+                                            placeholder="Ask for anything..."
+                                            rows={1}
+                                            style={{ height: 'auto' }}
+                                            onInput={(e: any) => {
+                                                e.target.style.height = 'auto';
+                                                e.target.style.height = e.target.scrollHeight + 'px';
+                                            }}
+                                        />
+                                        <button className={cn("text-zinc-600 hover:text-zinc-900 p-1 shrink-0 transition-colors", isListening ? "text-red-500 animate-pulse" : "")} onClick={handleVoiceToggle}>
+                                            <Mic size={20} />
+                                        </button>
+                                        <button 
+                                            onClick={() => {sendMessage();}}
+                                            className={cn("p-1 shrink-0 transition-colors text-zinc-500", (inputText.trim() || attachment) ? "text-zinc-900" : "")}
+                                            disabled={!inputText.trim() && !attachment}
+                                        >
+                                            <Send size={20} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                      </div>
-                    )}
-                    {messages.map((m, i) => (
-                      <ChatMessageItem key={i} m={m} />
-                    ))}
-                    {isTyping && (
-                      <div className="flex gap-4 items-center">
-                         <div className="w-1 h-1 bg-brand rounded-full animate-pulse" />
-                         <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Calculating...</span>
-                      </div>
-                    )}
-                     <div ref={chatEndRef} />
-                   </div>
-                   
-                   {/* Minimal Input Area */}
-                   <div className="px-3 sm:px-6 lg:px-10 xl:px-12 pt-3 pb-3 sticky bottom-0 bg-paper/95 backdrop-blur-md border-t border-zinc-100/70 flex flex-col z-20 safe-area-bottom">
-                     <div className="hidden md:flex gap-2 mb-3 flex-wrap">
-                       {(['live', 'stats', 'trends'] as const).map(mode => {
-                         const isActive = groundingMode === mode;
-                         return (
-                           <button
-                             key={mode}
-                             type="button"
-                             onClick={() => toggleMode(mode)}
-                             className={cn(
-                               "flex items-center justify-center transition-all text-[11px] rounded-[14px] px-[14px] py-[6px] tracking-wide uppercase",
-                               isActive
-                                 ? "bg-[#2D4A3E]/10 border border-[#2D4A3E]/60 text-brand font-medium"
-                                 : "bg-transparent border border-[#2D4A3E]/30 text-brand/70 hover:text-brand hover:border-[#2D4A3E]/50"
-                             )}
-                           >
-                             {isActive && (
-                               <span className="w-1.5 h-1.5 rounded-full bg-brand mr-2" />
-                             )}
-                             {mode}
-                           </button>
-                         );
-                       })}
-                     </div>
-                     
-                     {messages.length === 0 && (
-                       <div className="hidden md:flex flex-wrap gap-3 mb-4">
-                         {getSuggestions().map((sug, idx) => (
-                           <button 
-                             key={idx}
-                             type="button" 
-                             onClick={() => setInputText(sug)} 
-                             className="text-[11px] bg-white border border-zinc-200 text-zinc-600 px-4 py-2 rounded-full hover:bg-zinc-50 hover:text-ink transition-colors"
-                           >
-                             {sug}
-                           </button>
-                         ))}
-                       </div>
-                     )}
-
-                     <div className="md:hidden flex gap-2 mb-2 overflow-x-auto no-scrollbar pb-1">
-                       {(['live', 'stats', 'trends'] as const).map(mode => {
-                         const isActive = groundingMode === mode;
-                         return (
-                           <button
-                             key={mode}
-                             type="button"
-                             onClick={() => toggleMode(mode)}
-                             className={cn(
-                               "flex items-center justify-center whitespace-nowrap transition-all text-[10px] rounded-full px-3 py-1.5 uppercase tracking-wide border",
-                               isActive
-                                 ? "bg-[#2D4A3E]/10 border-[#2D4A3E]/60 text-brand font-medium"
-                                 : "bg-white border-zinc-200 text-zinc-600"
-                             )}
-                           >
-                             {mode}
-                           </button>
-                         );
-                       })}
-                     </div>
-
-                     <form onSubmit={sendMessage} className="relative shadow-sm rounded-full flex items-center gap-2 w-full bg-white border border-zinc-200 px-3 py-2">
-                       <button
-                         type="button"
-                         onClick={() => setIsMobileTabMenuOpen(true)}
-                         className="md:hidden w-9 h-9 rounded-full text-zinc-700 hover:bg-zinc-100 flex items-center justify-center"
-                         aria-label="Open quick actions"
-                       >
-                         <Plus size={20} />
-                       </button>
-                       <input 
-                         type="text"
-                         value={inputText}
-                         onChange={(e) => setInputText(e.target.value)}
-                         placeholder="Ask Baseline"
-                         className="w-full bg-transparent border-none rounded-lg px-1 md:px-3 py-2 md:py-3 focus:outline-none transition-all text-base md:text-sm text-ink placeholder:text-zinc-500"
-                       />
-                       <button 
-                         type="button"
-                         className="md:hidden w-9 h-9 rounded-full text-zinc-500 hover:bg-zinc-100 flex items-center justify-center"
-                         aria-label="Voice input"
-                       >
-                         <Mic size={18} />
-                       </button>
-                       <button 
-                         type="submit"
-                         disabled={!inputText.trim() || isTyping}
-                         className="w-10 h-10 rounded-full bg-ink text-white flex items-center justify-center transition-colors disabled:opacity-30"
-                       >
-                         <Send size={18} strokeWidth={1.8} />
-                       </button>
-                     </form>
-                   </div>
+                    </div>
                 </motion.div>
               )}
 
-               {activeTab === 'odds' && (
-                 <motion.div 
-                   key="odds"
-                   initial={{ opacity: 0 }}
-                   animate={{ opacity: 1 }}
-                   exit={{ opacity: 0 }}
-                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto custom-scrollbar"
-                 >
-                   <div className="max-w-5xl mx-auto space-y-10">
-                     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-zinc-100 pb-7">
-                       <div>
-                         <h2 className="text-3xl sm:text-4xl serif-italic font-medium text-ink tracking-tight mb-4">The Daily Board</h2>
-                         <div className="flex items-center gap-2 bg-zinc-50/50 p-1 rounded-lg border border-zinc-100 inline-flex">
-                           {['previous', 'today', 'tomorrow'].map(filter => (
-                             <button
-                               key={filter}
-                               onClick={() => setSlateFilter(filter as any)}
-                               className={cn(
-                                 "text-[11px] uppercase tracking-widest font-bold px-6 py-2 rounded-md transition-all",
-                                 slateFilter === filter 
-                                   ? "bg-white text-brand shadow-sm ring-1 ring-zinc-200/50" 
-                                   : "text-zinc-500 hover:text-ink hover:bg-zinc-100/50"
-                               )}
-                             >
-                               {filter}
-                             </button>
-                           ))}
-                         </div>
-                       </div>
-                       <button 
-                         onClick={refreshOdds}
-                         className="flex items-center gap-2 group text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-ink transition-colors"
-                       >
-                         <RefreshCw size={12} className={isTyping ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"} strokeWidth={2} />
-                         Refresh Feed
-                       </button>
-                     </div>
-
-                     <div className="grid md:grid-cols-2 gap-5 md:gap-6 mt-2">
-                       {fullSlate.map((odd) => (
-                         <OddsCard 
-                           key={odd.id} 
-                           odd={odd} 
-                           onClick={() => {
-                             setActiveTab('chat');
-                             setInputText(`Read on ${odd.away_team} @ ${odd.home_team}`);
-                             setTimeout(() => {
-                                (document.querySelector('input[type="text"]') as HTMLInputElement)?.focus();
-                             }, 100);
-                           }} 
-                         />
-                       ))}
-                       {isLoadingOdds ? (
-                          <div className="col-span-full py-16 flex flex-col items-center justify-center border border-dashed border-zinc-200 rounded-xl space-y-4">
-                             <RefreshCw className="animate-spin text-zinc-300" size={24} />
-                             <p className="text-zinc-500 italic serif">Hydrating market data...</p>
-                          </div>
-                       ) : fullSlate.length === 0 ? (
-                          <div className="col-span-full py-20 flex flex-col items-center justify-center text-center border border-dashed border-zinc-200 rounded-xl">
-                             <p className="text-zinc-600 font-medium mb-1">No games today.</p>
-                             <p className="text-zinc-500 text-sm">Check back tomorrow.</p>
-                          </div>
-                       ) : null}
-                     </div>
-                   </div>
-                 </motion.div>
-               )}
-
-               {activeTab === 'ledger' && (
-                 <motion.div 
-                   key="ledger"
-                   initial={{ opacity: 0 }}
-                   animate={{ opacity: 1 }}
-                   exit={{ opacity: 0 }}
-                   className="p-4 sm:p-6 xl:p-10 h-full flex flex-col overflow-y-auto custom-scrollbar"
-                 >
-                   <div className="max-w-3xl">
-                     <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-2">My Action Ledger</h2>
-                     <p className="text-zinc-500 font-mono text-sm mb-12">Private beta matching your bet history against public ML facts.</p>
-                     
-                     <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-8 mb-8 relative overflow-hidden">
-                       <div className="absolute top-0 right-0 p-4">
-                       </div>
-                       <h3 className="text-lg serif font-medium text-ink mb-4">Your Edges and Leaks</h3>
-                       <p className="text-zinc-600 text-sm leading-relaxed mb-6 font-mono">
-                         Pattern matching your recent MLB history in `credentialdb` against real-time ESPN situational data. You have a heavy tendency (-14% ROI) to back home favorites on getaway day games.
-                       </p>
-                       <div className="flex items-center gap-4 border-t border-zinc-200/50 pt-4">
-                         <button className="text-[11px] uppercase tracking-widest font-bold text-ink hover:text-brand transition-colors flex items-center gap-2">
-                           Run Full Audit <ChevronRight size={14} />
-                         </button>
-                       </div>
-                     </div>
-
-                     <div className="space-y-4">
-                       <h3 className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-500 mb-4 border-b border-zinc-100 pb-2">Recent Logged Bets</h3>
-                       
-                       <div className="flex items-center justify-between p-4 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors">
-                         <div className="flex flex-col gap-1">
-                           <span className="text-sm font-semibold text-ink">Phillies ML</span>
-                           <span className="text-[10px] font-mono text-zinc-500">vs Athletics • May 5, 2026</span>
-                         </div>
-                         <div className="flex flex-col items-end gap-1">
-                           <span className="text-sm font-mono text-zinc-500">-135</span>
-                           <span className="text-[10px] font-bold uppercase text-brand">Win</span>
-                         </div>
-                       </div>
-
-                       <div className="flex items-center justify-between p-4 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors">
-                         <div className="flex flex-col gap-1">
-                           <span className="text-sm font-semibold text-ink">Orioles / Marlins Under 8.5</span>
-                           <span className="text-[10px] font-mono text-zinc-500">MIA @ BAL • May 4, 2026</span>
-                         </div>
-                         <div className="flex flex-col items-end gap-1">
-                           <span className="text-sm font-mono text-zinc-500">-110</span>
-                           <span className="text-[10px] font-bold uppercase text-[#D23D33]">Loss</span>
-                         </div>
-                       </div>
-                       
-                       <button className="w-full mt-4 py-4 border border-zinc-200 border-dashed rounded-lg text-zinc-500 hover:text-ink hover:border-zinc-300 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
-                         <PlusCircle size={14} /> Log Manual Bet
-                       </button>
-                     </div>
-                   </div>
-                 </motion.div>
-               )}
-
-               {activeTab === 'wallet' && (
-                 <motion.div 
-                   key="wallet"
-                   initial={{ opacity: 0 }}
-                   animate={{ opacity: 1 }}
-                   exit={{ opacity: 0 }}
-                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto"
-                 >
-                   <div className="max-w-4xl mx-auto">
-                      <div className="border-b border-zinc-100 pb-10 mb-12">
-                        <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">Schedule</h2>
-                        <p className="text-zinc-500 text-[10px] uppercase tracking-[0.35em] font-bold mt-4">Upcoming Rotations</p>
-                      </div>
-                      
-                      <div className="space-y-6">
-                         {[1,2,3,4,5].map(i => (
-                           <div key={i} className="flex items-center gap-4 sm:gap-8 py-6 border-b border-zinc-100 group">
-                              <span className="font-mono text-zinc-500 group-hover:text-ink transition-colors">0{i}</span>
-                              <div className="flex-1">
-                                 <h4 className="text-lg font-medium text-zinc-600 group-hover:text-ink transition-colors">San Francisco AT Los Angeles</h4>
-                                 <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mt-1">7:10 PM ET • Dodger Stadium</p>
-                              </div>
-                              <div className="text-right">
-                                 <span className="block font-mono text-zinc-600 group-hover:text-brand transition-colors">-145 / +125</span>
-                                 <span className="text-[9px] uppercase font-bold text-zinc-500">Total 8.5</span>
-                              </div>
-                           </div>
-                         ))}
-                      </div>
-                   </div>
-                 </motion.div>
-               )}
-
-               {activeTab === 'artifacts' && (
-                 <motion.div 
-                   key="artifacts"
-                   initial={{ opacity: 0 }}
-                   animate={{ opacity: 1 }}
-                   exit={{ opacity: 0 }}
-                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto"
-                 >
-                   <div className="max-w-4xl mx-auto">
-                     <div className="border-b border-zinc-100 pb-10 mb-12">
-                       <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">Generated Artifacts</h2>
-                       <p className="text-zinc-500 text-[10px] uppercase tracking-[0.35em] font-bold mt-4">Registry of interfaces & reports</p>
-                     </div>
-                     
-                     {artifactsList.length === 0 ? (
-                       <div className="bg-white border border-dashed border-zinc-200 rounded-lg p-16 text-center text-zinc-500 flex flex-col items-center">
-                          <FileText size={32} strokeWidth={1} className="text-zinc-300 mb-6" />
-                          <h3 className="serif text-2xl mb-2 text-ink">No artifacts yet</h3>
-                          <p className="font-mono text-xs">Ask the generative model to create an interface or report.</p>
-                       </div>
-                     ) : (
-                       <div className="grid gap-6">
-                         {artifactsList.map((artifact) => (
-                           <div key={artifact.id} className="bg-white border border-zinc-200 rounded-xl p-8 hover:shadow-md transition-all group flex justify-between items-center cursor-pointer relative overflow-hidden" onClick={() => window.open(`?artifact=${artifact.id}`, '_blank', 'noopener,noreferrer')}>
-                             <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-                               <FileText size={120} />
-                             </div>
-                             <div className="flex flex-col gap-3 relative z-10">
-                               <div className="flex items-center gap-4">
-                                 <h3 className="font-serif text-2xl text-ink group-hover:text-brand transition-colors">{artifact.title || 'Untitled Interface'}</h3>
-                                 <span className="bg-zinc-100 text-zinc-600 px-3 py-1 rounded-full text-[9px] uppercase font-bold tracking-widest">{artifact.type}</span>
-                               </div>
-                               <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-zinc-500">
-                                 <span className="flex items-center gap-2"><Globe size={14} className="text-zinc-500" /> {artifact.source || 'Generated Server-Side'}</span>
-                                 {artifact.createdAt && (
-                                   <span><span className="text-zinc-500 uppercase tracking-wider text-[10px] font-bold mr-2">Deployed</span> {new Date(artifact.createdAt.toMillis()).toLocaleString()}</span>
-                                 )}
-                               </div>
-                             </div>
-                             <div className="relative z-10 w-12 h-12 flex items-center justify-center rounded-full bg-zinc-50 group-hover:bg-brand group-hover:text-white transition-colors">
-                               <ChevronRight size={20} className="text-zinc-500 group-hover:text-white transition-colors" />
-                             </div>
-                           </div>
-                         ))}
-                       </div>
-                     )}
-                   </div>
-                 </motion.div>
-               )}
-                 </AnimatePresence>
-               } />
-               <Route path="/game/:gameId" element={<GameDetailView odds={odds} />} />
-               <Route path="/pricing" element={<PricingView user={user} onSubscribe={(tier) => console.log('Subscribe:', tier)} />} />
-             </Routes>
-          </div>
-
-          {/* Sidebar / Bottom Rail */}
-          <aside className={cn(
-            "w-full xl:w-80 bg-white flex flex-col shrink-0 border-t xl:border-t-0 xl:border-l border-zinc-100 xl:overflow-y-auto custom-scrollbar safe-area-bottom",
-            activeTab === 'chat' ? "hidden xl:flex" : ""
-          )}>
-            {/* Mobile Toggle */}
-            <button 
-              className="xl:hidden w-full h-16 flex items-center justify-between px-4 sm:px-6 border-b border-zinc-100 bg-white sticky top-0 z-10"
-              onClick={() => setIsSlateExpanded(!isSlateExpanded)}
-            >
-              <span className="text-[10px] font-bold tracking-[0.35em] text-zinc-500 uppercase">View Action & Results</span>
-              <ChevronRight className={cn("text-zinc-500 transition-transform", isSlateExpanded && "rotate-90")} size={16} />
-            </button>
-
-            <div className={cn("xl:block", !isSlateExpanded && "hidden")}>
-              {/* Full Slate */}
-              <div className="border-b border-black/10">
-                <div className="hidden xl:flex flex-col border-b border-black/10 bg-white sticky top-0 z-10 pt-4">
-                  <div className="px-10 mb-4 flex justify-between items-center">
-                    <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Full Slate</span>
-                  </div>
-                  <div className="flex w-full overflow-x-auto no-scrollbar border-t border-black/10">
-                    {['previous', 'today', 'tomorrow'].map(filter => (
-                      <button
-                        key={filter}
-                        onClick={() => setSlateFilter(filter as any)}
-                        className={cn(
-                          "flex-1 text-[9px] uppercase tracking-widest font-bold py-3 text-center transition-colors border-b-2 hover:bg-zinc-50",
-                          slateFilter === filter 
-                            ? "border-brand text-brand" 
-                            : "border-transparent text-zinc-500 hover:text-zinc-800"
-                        )}
-                      >
-                        {filter}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-0">
-                  {isLoadingOdds ? (
-                    <div className="p-10 text-center">
-                      <RefreshCw className="animate-spin text-zinc-300 mx-auto mb-4" size={20} />
-                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Hydrating...</p>
-                    </div>
-                  ) : fullSlate.length === 0 ? (
-                    <div className="p-10 text-center flex flex-col gap-1 text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
-                      <span>No games today</span>
-                      <span>Check back tomorrow</span>
-                    </div>
-                  ) : fullSlate.map((odd, idx) => {
-                    const bookmaker = odd.bookmakers[0];
-                    const totals = bookmaker?.markets.find(m => m.key === 'totals');
-                    const totalPoint = totals?.outcomes.find(o => o.name === 'Over')?.point;
-                    const h2h = bookmaker?.markets.find(m => m.key === 'h2h');
-                    const moneylineStr = typeof h2h?.outcomes[0]?.price === 'string' ? h2h.outcomes[0].price : undefined;
-                    
-                    return (
-                      <Link 
-                        key={idx} 
-                        to={`/game/${odd.id}`}
-                        className={cn(
-                          "block w-full flex flex-col px-6 xl:px-10 py-5 border-b border-zinc-50/50 transition-colors group text-left",
-                          odd.status === 'live' ? "bg-brand/5 hover:bg-brand/10" : "hover:bg-zinc-50"
-                        )}
-                      >
-                        <div className="w-full flex items-center justify-between">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-brand live-pulse" />}
-                              <span className="text-[10px] font-mono text-zinc-600 group-hover:text-zinc-900 transition-colors">
-                                {odd.status === 'live' ? (
-                                  <>LIVE{odd.situation ? ` • ${odd.situation}` : ''}</>
-                                ) : odd.status === 'final' ? (
-                                  <>FINAL</>
-                                ) : (
-                                  new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-                                )}
-                                {odd.market_data_status?.state === 'partial' && (
-                                  <span className="ml-2 uppercase tracking-wide text-[9px] text-zinc-500">ESPN checked</span>
-                                )}
-                              </span>
-                            </div>
-                            <div className="text-sm serif text-zinc-800 mt-1">
-                              {odd.status === 'live' || odd.status === 'final' ? (
-                                <div className="flex flex-col gap-1">
-                                  <span>{odd.away_team} <span className="font-mono font-bold text-xs ml-1">{odd.away_score || "0"}</span></span>
-                                  <span>{odd.home_team} <span className="font-mono font-bold text-xs ml-1">{odd.home_score || "0"}</span></span>
+                      {activeTab === "board" && (
+                        <motion.div
+                          key="board"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar"
+                        >
+                          <div className="max-w-6xl mx-auto space-y-8 md:space-y-16">
+                            <div className="flex flex-col border-b border-zinc-100 md:pb-10 md:gap-6">
+                              {/* DESKTOP HEADER (>768px) */}
+                              <div className="hidden md:flex flex-row items-end justify-between gap-6 pb-4 md:pb-0">
+                                <div>
+                                  <h2 className="text-4xl serif-italic font-medium text-zinc-900 tracking-tight mb-8">
+                                    The Daily Board
+                                  </h2>
+                                  <div className="hidden md:flex items-center gap-4">
+                                    <div className="flex items-center gap-6 inline-flex">
+                                      {["previous", "today", "tomorrow"].map(
+                                        (filter) => (
+                                          <button
+                                            key={filter}
+                                            onClick={() =>
+                                              setSlateFilter(filter as any)
+                                            }
+                                            className={cn(
+                                              "text-[11px] uppercase tracking-[0.2em] transition-colors",
+                                              slateFilter === filter
+                                                ? "text-zinc-900 font-medium"
+                                                : "text-zinc-400 hover:text-zinc-600",
+                                            )}
+                                          >
+                                            {filter}
+                                          </button>
+                                        ),
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-6 inline-flex">
+                                      {["all", "pregame", "live", "ended"].map(
+                                        (filter) => (
+                                          <button
+                                            key={filter}
+                                            onClick={() =>
+                                              setGameStatusFilter(filter as any)
+                                            }
+                                            className={cn(
+                                              "text-[11px] uppercase tracking-[0.2em] transition-colors",
+                                              gameStatusFilter === filter
+                                                ? "text-zinc-900 font-medium"
+                                                : "text-zinc-400 hover:text-zinc-600",
+                                            )}
+                                          >
+                                            {filter}
+                                          </button>
+                                        ),
+                                      )}
+                                    </div>
+                                    <div className="flex items-center p-1 bg-zinc-100/60 rounded-xl border border-zinc-200/50 inline-flex">
+                                      {[
+                                        { label: "Sportsbooks", val: "sportsbook" },
+                                        { label: "Prediction Markets", val: "prediction" }
+                                      ].map((source) => (
+                                        <button
+                                          key={source.val}
+                                          onClick={() => {
+                                            setOddsSource(source.val as any);
+                                            setSelectedBookie("All Bookmakers");
+                                          }}
+                                          className={cn(
+                                            "text-[10px] uppercase tracking-widest font-bold px-4 py-2 rounded-lg transition-all duration-300",
+                                            oddsSource === source.val
+                                              ? "bg-zinc-900 text-white shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
+                                              : "text-zinc-500 hover:text-zinc-700",
+                                          )}
+                                        >
+                                          {source.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
                                 </div>
-                              ) : (
-                                <span>{odd.away_team} @ {odd.home_team}</span>
+                                <div className="flex items-center gap-4">
+                                  <button
+                                    onClick={() => setShowFilters(!showFilters)}
+                                    className={cn(
+                                      "flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest px-4 py-2.5 rounded-full border transition-all duration-300",
+                                      showFilters
+                                        ? "bg-zinc-900 border-zinc-900 text-white"
+                                        : "bg-white border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:text-zinc-800",
+                                    )}
+                                  >
+                                    Filters
+                                  </button>
+                                  <button
+                                    onClick={refreshOdds}
+                                    className="flex items-center gap-2 group text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-800 transition-colors"
+                                  >
+                                    Refresh
+                                  </button>
+                                </div>
+                                                              {/* MOBILE HEADER (<768px) - REMOVED */}
+                              
+                              <AnimatePresence>
+                                {showFilters && (
+                                  <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: "auto" }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="flex flex-wrap gap-8 pt-4">
+                                      <div className="space-y-3">
+                                        <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-400">
+                                          Bookmaker
+                                        </span>
+                                        <div className="relative group">
+                                          <select
+                                            value={selectedBookie}
+                                            onChange={(e) =>
+                                              setSelectedBookie?.(e.target.value)
+                                            }
+                                            className="appearance-none bg-zinc-50 border border-zinc-100 rounded-lg px-4 py-2 pr-10 text-[11px] font-medium text-zinc-600 focus:outline-none focus:border-brand/40 cursor-pointer"
+                                          >
+                                            <option>All Bookmakers</option>
+                                            {allBookmakers?.map((b) => (
+                                              <option key={b}>{b}</option>
+                                            ))}
+                                          </select>
+                                          <ChevronDown
+                                            size={12}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+                                          />
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-3">
+                                        <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-400">
+                                          Market
+                                        </span>
+                                        <div className="flex gap-2 bg-zinc-50 p-1 rounded-lg border border-zinc-100">
+                                          {["all", "h2h", "spreads", "totals"].map(
+                                            (m) => (
+                                              <button
+                                                key={m}
+                                                onClick={() =>
+                                                  setSelectedMarket?.(m)
+                                                }
+                                                className={cn(
+                                                  "text-[10px] uppercase font-bold px-4 py-1.5 rounded-md transition-all",
+                                                  selectedMarket === m
+                                                    ? "bg-white text-ink shadow-sm ring-1 ring-zinc-200/50"
+                                                    : "text-zinc-400 hover:text-ink hover:bg-zinc-100/30",
+                                                )}
+                                              >
+                                                {m}
+                                              </button>
+                                            ),
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-3">
+                                        <span className="text-[10px] uppercase font-bold tracking-widest text-zinc-400">
+                                          Odds Range
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          <input
+                                            type="number"
+                                            placeholder="Min"
+                                            value={minOdds}
+                                            onChange={(e) =>
+                                              setMinOdds?.(e.target.value)
+                                            }
+                                            className="w-20 bg-zinc-50 border border-zinc-100 rounded-lg px-3 py-2 text-[11px] font-medium text-zinc-600 focus:outline-none focus:border-brand/40"
+                                          />
+                                          <span className="text-zinc-300">
+                                            —
+                                          </span>
+                                          <input
+                                            type="number"
+                                            placeholder="Max"
+                                            value={maxOdds}
+                                            onChange={(e) =>
+                                              setMaxOdds?.(e.target.value)
+                                            }
+                                            className="w-20 bg-zinc-50 border border-zinc-100 rounded-lg px-3 py-2 text-[11px] font-medium text-zinc-600 focus:outline-none focus:border-brand/40"
+                                          />
+                                          <button
+                                            onClick={() => {
+                                              setMinOdds?.("");
+                                              setMaxOdds?.("");
+                                              setSelectedBookie?.(
+                                                "All Bookmakers",
+                                              );
+                                              setSelectedMarket?.("all");
+                                            }}
+                                            className="text-[10px] font-bold text-zinc-400 hover:text-brand px-3 underline ml-2"
+                                          >
+                                            Reset
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12 mt-4">
+                            {fullSlate?.map((odd) => (
+                              <OddsCard
+                                key={odd.id}
+                                odd={odd}
+                                oddsSource={oddsSource}
+                                onClick={() => {
+                                  const matchDate = new Date(odd.commence_time).toISOString().split('T')[0];
+                                  const homeSlug = odd.home_team.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                                  const awaySlug = odd.away_team.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                                  navigate(`/game/${matchDate}/${awaySlug}-at-${homeSlug}`);
+                                }}
+                              />
+                            ))}
+                            {isLoadingOdds ? (
+                              <>
+                                {[1, 2, 3, 4].map(i => (
+                                  <div key={i} className="bg-white border border-zinc-100 rounded-3xl p-8 h-80 animate-pulse flex flex-col gap-8">
+                                    <div className="h-4 bg-zinc-100 rounded w-1/3" />
+                                    <div className="flex justify-between items-center px-4">
+                                      <div className="w-16 h-16 bg-zinc-100 rounded-full" />
+                                      <div className="w-16 h-16 bg-zinc-100 rounded-full" />
+                                    </div>
+                                    <div className="space-y-3">
+                                      <div className="h-4 bg-zinc-100 rounded w-full" />
+                                      <div className="h-4 bg-zinc-100 rounded w-5/6" />
+                                    </div>
+                                  </div>
+                                ))}
+                              </>
+                            ) : oddsSource === "prediction" && (fullSlate?.length || 0) === 0 ? (
+                              <div className="col-span-full py-24 flex flex-col items-center justify-center text-center border border-dashed border-zinc-200 rounded-xl bg-zinc-50/30">
+                                <div className="w-12 h-12 bg-brand/5 text-brand/40 rounded-full flex items-center justify-center mb-6">
+                                  <BarChart size={24} />
+                                </div>
+                                <h3 className="text-lg serif font-medium text-ink mb-2">
+                                  Prediction Markets Integrating
+                                </h3>
+                                <p className="text-zinc-500 max-w-sm mx-auto text-sm leading-relaxed px-6">
+                                  Prediction markets data integrating shortly. Check back soon for Kalshi market prices alongside sportsbook lines.
+                                </p>
+                              </div>
+                            ) : (fullSlate?.length || 0) === 0 ? (
+                              <div className="col-span-full py-24 flex flex-col items-center justify-center text-center border border-dashed border-zinc-200 rounded-xl">
+                                <p className="text-zinc-600 font-medium mb-1">
+                                  No games found.
+                                </p>
+                                <p className="text-zinc-400 text-sm">
+                                  Try checking a different section.
+                                </p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                      {activeTab === "ledger" && (
+                        <motion.div
+                          key="ledger"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 h-full flex flex-col overflow-y-auto"
+                        >
+                          <div className="max-w-3xl">
+                            <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-2">
+                              My Action Ledger
+                            </h2>
+                            <p className="text-zinc-500 font-mono text-sm mb-12">
+                              Private beta matching your bet history against
+                              public ML facts.
+                            </p>
+
+                            <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-8 mb-8 relative overflow-hidden">
+                              <div className="absolute top-0 right-0 p-4"></div>
+                              <h3 className="text-lg serif font-medium text-ink mb-4">
+                                Your Edges and Leaks
+                              </h3>
+                              <p className="text-zinc-600 text-sm leading-relaxed mb-6 font-mono">
+                                Pattern matching your recent MLB history in
+                                `credentialdb` against real-time ESPN
+                                situational data. You have a heavy tendency
+                                (-14% ROI) to back home favorites on getaway day
+                                games.
+                              </p>
+                              <div className="flex items-center gap-4 border-t border-zinc-200/50 pt-4">
+                                <button className="text-[11px] uppercase tracking-widest font-bold text-ink hover:text-brand transition-colors flex items-center gap-2">
+                                  Run Full Audit <ChevronRight size={14} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="space-y-8">
+                              <h3 className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-400 mb-4 border-b border-zinc-100 pb-2">
+                                Vision AI Import
+                              </h3>
+                              
+                              <div className="bg-white border-2 border-dashed border-zinc-200 rounded-2xl p-8 hover:border-brand/30 hover:bg-zinc-50/50 transition-all text-center relative group">
+                                <input 
+                                  type="file" 
+                                  accept="image/*"
+                                  title="Upload Betting Slip"
+                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                  onChange={(e) => {
+                                    if (e.target.files?.[0]) handleLedgerUpload(e.target.files[0]);
+                                  }}
+                                />
+                                <div className="pointer-events-none flex flex-col items-center gap-4">
+                                  <div className="w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center text-zinc-400 group-hover:text-brand transition-colors group-hover:scale-110 duration-300">
+                                    <Camera size={24} strokeWidth={1.5} />
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-ink mb-1">Drop a screenshot to audit</p>
+                                    <p className="text-xs text-zinc-500 max-w-sm mx-auto font-mono">Baseline Vision will extract odds, stake, and side, then analyze against institutional metrics.</p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {ledgerPreview && (
+                                <div className="bg-zinc-50 border border-zinc-100 rounded-2xl overflow-hidden mt-6">
+                                  <div className="flex border-b border-zinc-100">
+                                    <div className="w-1/3 bg-zinc-100 p-4 relative min-h-[150px]">
+                                      <img src={ledgerPreview} alt="Slip Preview" className="absolute inset-0 w-full h-full object-cover opacity-90 mix-blend-multiply" />
+                                    </div>
+                                    <div className="w-2/3 p-6 flex flex-col justify-center">
+                                      {isAnalyzingLedger ? (
+                                        <div className="flex flex-col items-center justify-center h-full text-zinc-400 gap-4">
+                                          <Loader2 className="animate-spin text-brand" size={24} />
+                                          <span className="font-mono text-xs uppercase tracking-widest text-zinc-500">Extracting SLIP DATA...</span>
+                                        </div>
+                                      ) : ledgerAnalysis ? (
+                                        <div className="markdown-body">
+                                          <ReactMarkdown>{ledgerAnalysis}</ReactMarkdown>
+                                        </div>
+                                      ) : (
+                                        <div className="text-zinc-500 italic">Processing...</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="mt-12">
+                                <h3 className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-400 mb-4 border-b border-zinc-100 pb-2 flex justify-between items-center">
+                                  <span>Recent Ledger</span>
+                                  <span className="font-mono text-[9px] bg-brand/10 text-brand px-2 py-0.5 rounded-full">30 DAYS</span>
+                                </h3>
+                                <div className="flex items-center justify-between p-4 border border-zinc-100 rounded-xl hover:border-zinc-200 transition-colors bg-white hover:shadow-sm">
+                                  <div className="flex flex-col gap-1.5">
+                                    <span className="text-sm font-semibold text-ink flex items-center gap-2">
+                                      Orioles / Marlins Under 8.5
+                                      <span className="px-1.5 py-0.5 bg-zinc-100 text-zinc-500 text-[9px] font-bold uppercase rounded leading-none">Manual</span>
+                                    </span>
+                                    <span className="text-[10px] font-mono text-zinc-500">
+                                      MIA @ BAL • {new Date("2026-05-04T12:00:00Z").toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' })}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-1.5">
+                                    <span className="text-sm font-mono text-zinc-400">
+                                      -110
+                                    </span>
+                                    <span className="text-[10px] font-bold uppercase text-[#D23D33] bg-[#D23D33]/10 px-2 py-0.5 rounded">
+                                      Loss
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {activeTab === "market" && (
+                        <motion.div
+                          key="market"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar"
+                        >
+                          <div className="max-w-5xl mx-auto">
+                            <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-zinc-100 pb-10 mb-12 gap-6">
+                              <div>
+                                <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">
+                                  Schedule
+                                </h2>
+                                <p className="text-zinc-400 text-[10px] uppercase tracking-[0.4em] font-bold mt-4">
+                                  Rotations & Line Metrics
+                                </p>
+                              </div>
+                              <div className="flex items-center bg-white border border-zinc-200 rounded-xl px-4 py-2 w-full md:w-64 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand/20 transition-all">
+                                <Search size={16} className="text-zinc-400 mr-2" />
+                                <input
+                                  type="text"
+                                  placeholder="Filter by team..."
+                                  className="bg-transparent border-none outline-none w-full text-sm text-ink font-mono placeholder:text-zinc-400 placeholder:font-sans"
+                                  value={scheduleTeamFilter}
+                                  onChange={(e) => setScheduleTeamFilter(e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid gap-6">
+                              {isLoadingOdds ? (
+                                <>
+                                  {[1, 2, 3].map(i => (
+                                    <div key={i} className="bg-white border border-zinc-100 rounded-2xl p-6 h-32 animate-pulse" />
+                                  ))}
+                                </>
+                              ) : odds.filter((odd) => {
+                                  const searchStr = scheduleTeamFilter.toLowerCase();
+                                  return (
+                                    odd.home_team.toLowerCase().includes(searchStr) ||
+                                    odd.away_team.toLowerCase().includes(searchStr)
+                                  );
+                                }).length === 0 ? (
+                                  <div className="py-20 text-center border border-dashed border-zinc-200 rounded-2xl bg-zinc-50/20">
+                                    <p className="text-zinc-400 font-serif italic">No matching matchups found in rotation.</p>
+                                  </div>
+                                ) : (
+                                  odds
+                                    .filter((odd) => {
+                                      const searchStr = scheduleTeamFilter.toLowerCase();
+                                      return (
+                                        odd.home_team.toLowerCase().includes(searchStr) ||
+                                        odd.away_team.toLowerCase().includes(searchStr)
+                                      );
+                                    })
+                                    .map((odd, idx) => {
+                                  // Simple true odds calculation (no-vig) across available books for ML
+                                  let maxHomeML = -Infinity;
+                                  let maxAwayML = -Infinity;
+                                  let consensusTotal = "";
+                                  
+                                  odd.bookmakers.forEach(bm => {
+                                    const h2h = bm.markets.find(m => m.key === 'h2h');
+                                    if (h2h) {
+                                      h2h.outcomes.forEach(out => {
+                                        if (out.name === odd.home_team) maxHomeML = Math.max(maxHomeML, out.price);
+                                        if (out.name === odd.away_team) maxAwayML = Math.max(maxAwayML, out.price);
+                                      });
+                                    }
+                                    const totals = bm.markets.find(m => m.key === 'totals');
+                                    if (totals && !consensusTotal) {
+                                      consensusTotal = String(totals.outcomes[0].point);
+                                    }
+                                  });
+
+                                  // Decimal to implied prob
+                                  const getProb = (dec: number) => (dec > 0 ? 1 / dec : 0);
+                                  const homeProb = getProb(maxHomeML);
+                                  const awayProb = getProb(maxAwayML);
+                                  const totalProb = homeProb + awayProb;
+                                  
+                                  // True odds / no-vig probability
+                                  const trueHomeProb = totalProb > 0 ? homeProb / totalProb : 0;
+                                  const trueAwayProb = totalProb > 0 ? awayProb / totalProb : 0;
+                                  
+                                  // Convert to American true odds
+                                  const toAmerican = (prob: number) => {
+                                    if (!prob || prob <= 0 || prob >= 1) return "N/A";
+                                    if (prob >= 0.5) {
+                                      return "-" + Math.round((prob / (1 - prob)) * 100);
+                                    } else {
+                                      return "+" + Math.round(((1 - prob) / prob) * 100);
+                                    }
+                                  };
+
+                                  const trueHome = toAmerican(trueHomeProb);
+                                  const trueAway = toAmerican(trueAwayProb);
+                                  const vigPct = totalProb > 1 ? ((totalProb - 1) * 100).toFixed(1) : "0.0";
+
+                                  return (
+                                    <div
+                                      key={odd.id}
+                                      className="bg-white border border-zinc-100 rounded-2xl p-6 hover:shadow-lg hover:border-zinc-200 transition-all group flex flex-col md:flex-row gap-6 md:gap-12 md:items-center relative overflow-hidden"
+                                    >
+                                      {/* Left side: Time & Teams */}
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-3 mb-4">
+                                          <span className="font-mono text-[10px] bg-zinc-100 text-zinc-500 px-2 py-1 rounded font-bold uppercase tracking-widest">
+                                            {new Date(odd.commence_time).toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric' })}
+                                          </span>
+                                          <span className="font-mono text-[10px] text-brand border border-brand/20 bg-brand/5 px-2 py-1 rounded font-bold uppercase tracking-widest">
+                                            {new Date(odd.commence_time).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' })} PT
+                                          </span>
+                                        </div>
+                                        
+                                        <div className="space-y-3">
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-lg font-medium text-zinc-600 group-hover:text-ink transition-colors">{odd.away_team}</span>
+                                            {maxAwayML > 0 && <span className="font-mono text-sm px-2 py-1 bg-zinc-50 rounded hidden md:block">{toAmerican(1 / maxAwayML)}</span>}
+                                          </div>
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-lg font-medium text-zinc-600 group-hover:text-ink transition-colors">{odd.home_team}</span>
+                                            {maxHomeML > 0 && <span className="font-mono text-sm px-2 py-1 bg-zinc-50 rounded hidden md:block">{toAmerican(1 / maxHomeML)}</span>}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Right side: Line Metrics */}
+                                      <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 pt-6 md:pt-0 border-t md:border-t-0 border-zinc-100 md:pl-8 md:border-l">
+                                        <div>
+                                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">True Odds</p>
+                                          <div className="space-y-1">
+                                            <p className="font-mono text-sm text-ink">{trueAway}</p>
+                                            <p className="font-mono text-sm text-ink">{trueHome}</p>
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Win Prob</p>
+                                          <div className="space-y-1">
+                                            <p className="font-mono text-sm text-zinc-500">{(trueAwayProb * 100).toFixed(1)}%</p>
+                                            <p className="font-mono text-sm text-zinc-500">{(trueHomeProb * 100).toFixed(1)}%</p>
+                                          </div>
+                                        </div>
+                                        <div className="col-span-2 md:col-span-1">
+                                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Market</p>
+                                          <div className="space-y-1">
+                                            <p className="font-mono text-xs text-zinc-500"><span className="text-zinc-400 mr-2">Vig:</span>{vigPct}%</p>
+                                            {consensusTotal && <p className="font-mono text-xs text-zinc-500"><span className="text-zinc-400 mr-2">Total:</span>{consensusTotal}</p>}
+                                            {odd.venue && <p className="font-mono text-[10px] text-zinc-400 mt-2 truncate w-[100px]" title={odd.venue}>{odd.venue}</p>}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })
                               )}
                             </div>
                           </div>
-                          <div className="text-right flex flex-col items-end gap-1.5">
-                            {moneylineStr && (
-                              <div className="text-right">
-                                <span className="text-[10px] uppercase tracking-widest text-zinc-500 mr-2">ML</span>
-                                <span className="font-mono text-sm text-zinc-800">{moneylineStr}</span>
-                              </div>
-                            )}
-                            {totalPoint && (
-                              <div className="text-right">
-                                <span className="text-[10px] uppercase tracking-widest text-zinc-500 mr-2">O/U</span>
-                                <span className="font-mono text-sm text-zinc-800">{totalPoint}</span>
-                              </div>
-                            )}
-                            {!moneylineStr && !totalPoint && odd.market_data_status?.state === "partial" && (
-                              <span className="text-[10px] uppercase tracking-widest text-zinc-500">ESPN checked · market line not found yet</span>
-                            )}
-                          </div>
-                        </div>
+                        </motion.div>
+                      )}
 
-                        {/* Yahoo Sports Style Pitcher Diamond */}
-                        {(odd.away_pitcher || odd.home_pitcher) && (
-                          <div className="w-full mt-4 pt-3 border-t border-black/10 transition-opacity">
-                            <div className="flex items-center gap-2 mb-3">
-                              <div className="w-1.5 h-1.5 rotate-45 bg-zinc-300 group-hover:bg-brand transition-colors shrink-0" />
-                              <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500 group-hover:text-brand transition-colors">Pitching Matchup</span>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <PitcherDisplay 
-                                teamFull={odd.away_team} 
-                                name={odd.away_pitcher} 
-                                headshot={odd.away_pitcher_headshot} 
-                                record={odd.away_pitcher_record} 
-                                small
-                              />
-                              <PitcherDisplay 
-                                teamFull={odd.home_team} 
-                                name={odd.home_pitcher} 
-                                headshot={odd.home_pitcher_headshot} 
-                                record={odd.home_pitcher_record} 
-                                alignRight 
-                                small
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Recent Finals */}
-              {finalGames.length > 0 && (
-                <div>
-                  <div className="h-16 flex items-center px-6 xl:px-10 border-b border-zinc-100 bg-white sticky top-0 z-10">
-                    <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Recent Finals</span>
-                  </div>
-                  <div className="p-6 xl:p-10 space-y-10">
-                    {finalGames.map((odd, idx) => (
-                      <div key={idx} className="space-y-4">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-tight truncate w-32">{odd.sport_title}</span>
-                          <span className="text-[9px] font-mono text-brand italic">FINAL</span>
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center text-sm">
-                            <div className="flex items-center gap-2.5 opacity-60">
-                              <img src={getEspnLogo(odd.away_team)} className="w-5 h-5 rounded-full border border-zinc-100 shadow-sm" alt="" />
-                              <span className="serif text-ink">{odd.away_team}</span>
-                            </div>
-                            <span className="font-mono text-zinc-500">{odd.away_score || "0"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-sm">
-                            <div className="flex items-center gap-2.5 font-medium">
-                              <img src={getEspnLogo(odd.home_team)} className="w-5 h-5 rounded-full border border-zinc-100 shadow-sm" alt="" />
-                              <span className="serif text-ink">{odd.home_team}</span>
-                            </div>
-                            <span className="font-mono font-bold text-ink">{odd.home_score || "0"}</span>
-                          </div>
-                        </div>
-                        {odd.result_context && (
-                          <div className="text-[11px] text-zinc-500 serif italic mt-2">
-                            {odd.score} — {odd.result_context.replace('✓', '')} <span className="text-brand not-italic ml-1">✓</span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              <div className="p-10 text-center mt-auto border-t border-zinc-100/50">
-                <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">ESPN checked board state</span>
-              </div>
+                    </AnimatePresence>
+                  }
+                />
+                <Route
+                  path="/game/:date/:slug"
+                  element={<GameDetail />}
+                />
+                <Route
+                  path="/pricing"
+                  element={
+                    <PricingView
+                      user={user}
+                      onSubscribe={(tier) => console.log("Subscribe:", tier)}
+                    />
+                  }
+                />
+              </Routes>
             </div>
-          </aside>
-        </div>
-      </main>
+
+            {/* Overlay for mobile bottom sheet */}
+            <AnimatePresence>
+            {isSlateExpanded && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-40 bg-zinc-900/10 backdrop-blur-sm xl:hidden"
+                onClick={() => setIsSlateExpanded(false)}
+              />
+            )}
+            </AnimatePresence>
+
+            {/* Sidebar / Bottom Rail */}
+            <motion.aside 
+              initial={false}
+              animate={{ 
+                x: isSlateOpen ? 0 : "100%",
+                y: 0 
+              }}
+              className={cn(
+                "bg-white/90 backdrop-blur-3xl flex flex-col shrink-0 border-l border-zinc-200/50",
+                "fixed top-0 bottom-0 right-0 w-80 z-60",
+                "shadow-none translate-y-0"
+              )}
+            >
+              {/* Slate Content */}
+              <div className="flex flex-col flex-1 overflow-hidden pt-4">
+                {/* Header & Tabs */}
+                <div className="flex-shrink-0 px-8 pb-4 z-20">
+                  <div className="flex items-center justify-between mb-6">
+                    <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">
+                      Action Slate
+                    </span>
+                    <button onClick={() => setIsSlateOpen(false)} className="text-zinc-400 hover:text-ink">
+                        <X size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar no-scrollbar">
+                  {/* Game List */}
+                  <div className="pb-8">
+                    {isLoadingOdds ? (
+                      <div className="p-10 text-center flex flex-col items-center justify-center mt-10">
+                        <p className="text-[9px] text-zinc-400 uppercase tracking-widest font-bold">
+                          Hydrating...
+                        </p>
+                      </div>
+                    ) : fullSlate.length === 0 ? (
+                      <div className="p-12 text-center flex flex-col gap-2 mt-10">
+                        <span className="text-[11px] text-zinc-400 font-medium">No games scheduled for {slateFilter}</span>
+                      </div>
+                    ) : (
+                      fullSlate.map((odd, idx) => {
+                        const bookmaker = odd.bookmakers[0];
+                        const totals = bookmaker?.markets.find((m) => m.key === "totals");
+                        const totalPoint = totals?.outcomes.find((o) => o.name === "Over")?.point;
+                        const h2h = bookmaker?.markets.find((m) => m.key === "h2h");
+                        const moneylineStr = typeof h2h?.outcomes[0]?.price === "string" ? h2h.outcomes[0].price : undefined;
+
+                        return (
+                          <Link
+                            key={idx}
+                            to={`/game/${odd.id}`}
+                            className={cn(
+                              "block w-full flex flex-col px-6 xl:px-8 py-5 border-b border-zinc-200/40 transition-colors duration-200 group text-left",
+                              odd.status === "live" ? "bg-red-500/[0.02] hover:bg-red-500/[0.04]" : "hover:bg-zinc-50"
+                            )}
+                          >
+                            <div className="w-full flex items-center justify-between">
+                              <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                  {odd.status === "live" && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                  )}
+                                  <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-400 group-hover:text-zinc-600 transition-colors">
+                                    {odd.status === "live" ? (
+                                      <span className="text-red-500">LIVE{odd.situation ? ` • ${odd.situation}` : ""}</span>
+                                    ) : odd.status === "final" ? (
+                                      "FINAL"
+                                    ) : (
+                                      new Date(odd.commence_time).toLocaleTimeString([], {
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                      })
+                                    )}
+                                    {bookmaker?.title && (
+                                      <span className="ml-2 text-zinc-300 group-hover:text-zinc-400 transition-colors">
+                                        ({bookmaker.title})
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="text-sm text-zinc-900 font-medium">
+                                  {odd.status === "live" || odd.status === "final" ? (
+                                    <div className="flex flex-col gap-1.5 font-serif-italic">
+                                      <span className="flex items-center justify-between w-40">
+                                        <span>{odd.away_team}</span>
+                                        <span className="font-mono font-medium text-xs text-zinc-500">{odd.away_score || "0"}</span>
+                                      </span>
+                                      <span className="flex items-center justify-between w-40">
+                                        <span>{odd.home_team}</span>
+                                        <span className="font-mono font-bold text-xs text-zinc-900">{odd.home_score || "0"}</span>
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col gap-1 font-serif-italic">
+                                      <span>{odd.away_team}</span>
+                                      <span className="text-zinc-400 text-xs">at {odd.home_team}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right flex flex-col items-end gap-2">
+                                {moneylineStr && (
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-300 group-hover:text-zinc-400 transition-colors">ML</span>
+                                    <span className="font-mono text-sm text-zinc-700 group-hover:text-zinc-900 transition-colors">{moneylineStr}</span>
+                                  </div>
+                                )}
+                                {totalPoint && (
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-300 group-hover:text-zinc-400 transition-colors">O/U</span>
+                                    <span className="font-mono text-sm text-zinc-700 group-hover:text-zinc-900 transition-colors">{totalPoint}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Pitching Matchup - clean and subtle */}
+                            {(odd.away_pitcher || odd.home_pitcher) && (
+                              <div className="w-full mt-4 pt-4 border-t border-zinc-200/40 opacity-70 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center gap-1.5 mb-3">
+                                  <span className="text-[8px] uppercase tracking-[0.2em] font-bold text-zinc-400">Matchup</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <PitcherDisplay teamFull={odd.away_team} name={odd.away_pitcher} headshot={odd.away_pitcher_headshot} record={odd.away_pitcher_record} small />
+                                  <PitcherDisplay teamFull={odd.home_team} name={odd.home_pitcher} headshot={odd.home_pitcher_headshot} record={odd.home_pitcher_record} alignRight small />
+                                </div>
+                              </div>
+                            )}
+                          </Link>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Recent Finals */}
+                  {finalGames.length > 0 && (
+                    <div className="border-t border-zinc-200/50 bg-zinc-50/50 mt-4 rounded-b-[2rem]">
+                      <div className="px-6 xl:px-8 py-5 border-b border-zinc-200/40">
+                        <span className="text-[10px] font-bold tracking-[0.2em] text-zinc-400 uppercase">
+                          Recent Finals
+                        </span>
+                      </div>
+                      <div className="p-6 xl:p-8 space-y-5">
+                        {finalGames.map((odd, idx) => (
+                          <Link 
+                            key={idx} 
+                            to={`/game/${odd.id}`}
+                            className="block space-y-4 group outline-none"
+                          >
+                            <div className="flex justify-between items-center bg-white p-5 rounded-[1.25rem] shadow-[0_2px_8px_rgba(0,0,0,0.02)] border border-zinc-200/60 group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-all duration-300">
+                               <div className="flex-1 space-y-3">
+                                  <div className="flex items-center gap-3 text-sm">
+                                    <img src={getEspnLogo(odd.away_team)} className="w-7 h-7 rounded-full border border-zinc-100 p-0.5 shadow-sm" alt="" />
+                                    <span className="serif text-zinc-800 flex-1">{odd.away_team}</span>
+                                    <span className="font-mono text-zinc-500 mr-2">{odd.away_score || "0"}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-sm">
+                                    <img src={getEspnLogo(odd.home_team)} className="w-7 h-7 rounded-full border border-zinc-100 p-0.5 shadow-sm" alt="" />
+                                    <span className="serif text-zinc-900 font-medium flex-1">{odd.home_team}</span>
+                                    <span className="font-mono text-zinc-900 font-bold mr-2">{odd.home_score || "0"}</span>
+                                  </div>
+                               </div>
+                               <ChevronRight className="w-4 h-4 text-zinc-300 group-hover:text-zinc-500 transition-colors" />
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-8 text-center mt-auto">
+                    <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-300">
+                      Data via ESPN & The Odds API
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </motion.aside>
+
+          </div>
+        </main>
       </div>
     </div>
   );
@@ -1501,64 +2350,216 @@ export default function App() {
 
 function AuthLanding({ onLogin }: { onLogin: () => void }) {
   return (
-    <div className="min-h-[100dvh] bg-paper flex flex-col items-center justify-center p-6 sm:p-12 text-center text-ink selection:bg-brand/10 safe-area-top safe-area-bottom">
-      <motion.div 
+    <div className="h-full w-full bg-paper flex flex-col items-center justify-center p-12 text-center text-ink selection:bg-brand/10">
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
         className="max-w-4xl w-full flex flex-col items-center"
       >
         <div className="mb-14 opacity-20">
-           <div className="w-12 h-12 flex items-center justify-center font-serif italic text-6xl font-medium text-brand">B</div>
+          <div className="w-12 h-12 flex items-center justify-center font-serif italic text-6xl font-medium text-brand">
+            B
+          </div>
         </div>
         <h1 className="text-[18vw] sm:text-9xl font-semibold tracking-[-0.04em] leading-[0.85] mb-12 flex flex-col items-center">
-           <span>THE DAILY</span>
-           <span className="serif-italic font-medium text-brand">BASELINE</span>
+          <span>THE DAILY</span>
+          <span className="serif-italic font-medium text-brand">BASELINE</span>
         </h1>
-        <p className="text-lg sm:text-xl text-zinc-600 max-w-xl mx-auto leading-relaxed mb-16 font-medium">
-           Institutional-grade statistical analysis and direct market board anchors. No fluff, just the tape.
+        <p className="text-lg sm:text-xl text-zinc-400 max-w-xl mx-auto leading-relaxed mb-16 font-medium">
+          Institutional-grade statistical analysis and direct market board
+          anchors. No fluff, just the tape.
         </p>
-        <button 
+        <button
           onClick={onLogin}
           className="group relative flex items-center gap-8 py-4 px-10 border border-zinc-200 rounded-full hover:border-[#2D4A3E]/30 hover:bg-[#2D4A3E]/5 transition-all duration-500 overflow-hidden"
         >
-          <div className="text-[11px] font-bold uppercase tracking-[0.4em] text-zinc-500 group-hover:text-brand transition-colors z-10 relative">Enter Board</div>
-          <ChevronRight size={14} className="text-zinc-500 group-hover:text-brand group-hover:translate-x-2 transition-all duration-500 z-10 relative" />
+          <div className="text-[11px] font-bold uppercase tracking-[0.4em] text-zinc-500 group-hover:text-brand transition-colors z-10 relative">
+            Enter Board
+          </div>
+          <ChevronRight
+            size={14}
+            className="text-zinc-300 group-hover:text-brand group-hover:translate-x-2 transition-all duration-500 z-10 relative"
+          />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2D4A3E]/5 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
         </button>
       </motion.div>
-      
-      <motion.div 
-         initial={{ opacity: 0 }}
-         animate={{ opacity: 1 }}
-         transition={{ delay: 0.5, duration: 1 }}
-         className="absolute bottom-12 flex items-center gap-8"
+
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5, duration: 1 }}
+        className="absolute bottom-12 flex items-center gap-8"
       >
-         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500">MLB</span>
-         <span className="w-1 h-1 bg-zinc-200 rounded-full" />
-         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500">NBA</span>
-         <span className="w-1 h-1 bg-zinc-200 rounded-full" />
-         <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500">Direct Feed</span>
+        <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-300">
+          MLB
+        </span>
+        <span className="w-1 h-1 bg-zinc-200 rounded-full" />
+        <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-300">
+          NBA
+        </span>
+        <span className="w-1 h-1 bg-zinc-200 rounded-full" />
+        <span className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-300">
+          Direct Feed
+        </span>
       </motion.div>
     </div>
   );
 }
 
-import { PricingView } from './components/PricingView';
+import { PricingView } from "./components/PricingView";
 
-function SideNavIcon({ active, onClick, icon }: { active: boolean, onClick: () => void, icon: React.ReactNode }) {
+function SideNavIcon({
+  active,
+  onClick,
+  icon,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+}) {
   return (
-    <button 
+    <button
       onClick={onClick}
-      className="relative flex flex-col items-center group transition-all duration-300 focus-visible:outline-none"
+      className={cn(
+        "relative w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-300",
+        active 
+          ? "bg-white text-brand shadow-precise border border-zinc-100" 
+          : "text-zinc-400 hover:text-ink hover:bg-zinc-100/50"
+      )}
     >
-      <div className={cn(
-        "w-10 h-10 flex items-center justify-center transition-all rounded-[14px]",
-        active ? "bg-zinc-200/60 text-ink shadow-sm" : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/50"
-      )}>
+      {active && (
+        <motion.div
+           layoutId="nav-pill"
+           className="absolute -left-4 w-1.5 h-4 bg-brand rounded-r-full"
+        />
+      )}
+      <div className={cn("transition-transform duration-300", active ? "scale-110" : "scale-100")}>
         {icon}
       </div>
     </button>
+  );
+}
+
+function HtmlArtifactBlock({ codeString }: { codeString: string }) {
+  const [view, setView] = useState<"preview" | "code">("preview");
+  const [copied, setCopied] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeString);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const containerClasses = isFullscreen 
+    ? "fixed inset-0 z-[100] bg-zinc-100 flex flex-col m-0 rounded-none w-full h-full"
+    : "my-8 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm flex flex-col w-full";
+
+  return (
+    <motion.div layout className={containerClasses}>
+      <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-3 py-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-2">
+            <FileText size={14} className="text-zinc-500" />
+            <span className="font-mono text-[11px] font-semibold text-zinc-600 uppercase tracking-wider">
+              HTML Artifact
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex bg-zinc-200/50 p-0.5 rounded-lg mr-2">
+            <button
+              onClick={() => setView("preview")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all ${
+                view === "preview" 
+                  ? "bg-white text-zinc-800 shadow-sm" 
+                  : "text-zinc-500 hover:text-zinc-700"
+              }`}
+            >
+              <Eye size={14} />
+              Preview
+            </button>
+            <button
+              onClick={() => setView("code")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium transition-all ${
+                view === "code" 
+                  ? "bg-white text-zinc-800 shadow-sm" 
+                  : "text-zinc-500 hover:text-zinc-700"
+              }`}
+            >
+              <Code2 size={14} />
+              Code
+            </button>
+          </div>
+
+          <DeployDocumentBtn content={codeString} />
+          
+          <button
+            className="p-1.5 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-md transition-all"
+            title="Copy HTML"
+            onClick={handleCopy}
+          >
+            {copied ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} />}
+          </button>
+          
+          <button
+            className="p-1.5 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-md transition-all hidden md:flex"
+            title={isFullscreen ? "Minimize" : "Expand"}
+            onClick={() => setIsFullscreen(!isFullscreen)}
+          >
+            {isFullscreen ? <X size={16} /> : <TerminalSquare size={16} />} 
+          </button>
+        </div>
+      </div>
+
+      <div className={`w-full overflow-hidden flex flex-col bg-zinc-100/50 items-center ${isFullscreen ? 'flex-1 p-4 md:p-8' : 'p-0 py-4 md:py-8'}`}>
+        <div className={`w-full bg-white shadow-sm ring-1 ring-zinc-900/5 relative overflow-hidden transition-all duration-300 ${isFullscreen ? 'h-full max-w-6xl rounded-2xl flex-1 flex' : 'min-h-[500px] h-[600px] max-w-[850px] rounded-xl'}`}>
+          <AnimatePresence mode="wait">
+            {view === "preview" ? (
+              <motion.iframe
+                key="preview"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                srcDoc={codeString}
+                className="w-full h-full border-none absolute inset-0 bg-white"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              />
+            ) : (
+              <motion.div
+                key="code"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="absolute inset-0 bg-[#0d1117] overflow-auto"
+              >
+                <div className="p-6">
+                  <SyntaxHighlighter
+                    language="html"
+                    style={vscDarkPlus}
+                    customStyle={{
+                      margin: 0,
+                      padding: 0,
+                      background: "transparent",
+                      fontSize: "13px",
+                      lineHeight: "1.6",
+                    }}
+                    wrapLines={true}
+                    wrapLongLines={true}
+                  >
+                    {codeString}
+                  </SyntaxHighlighter>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -1570,14 +2571,14 @@ function DeployDocumentBtn({ content }: { content: string }) {
     if (!auth.currentUser) return;
     setIsDeploying(true);
     try {
-      const docRef = await addDoc(collection(db, 'artifacts'), {
-        content: String(content).replace(/\n$/, ''),
-        type: 'html',
+      const docRef = await addDoc(collection(db, "artifacts"), {
+        content: String(content).replace(/\n$/, ""),
+        type: "html",
         title: "Generated Interface",
         source: "Gemini Chat Interaction",
         createdAt: serverTimestamp(),
         fetchedAt: serverTimestamp(),
-        creatorId: auth.currentUser.uid
+        creatorId: auth.currentUser.uid,
       });
       const url = `${window.location.origin}${window.location.pathname}?artifact=${docRef.id}`;
       setDeployedUrl(url);
@@ -1592,16 +2593,16 @@ function DeployDocumentBtn({ content }: { content: string }) {
     return (
       <div className="flex items-center gap-2">
         <span className="text-[10px] text-brand">Deployed!</span>
-        <button 
+        <button
           onClick={() => navigator.clipboard.writeText(deployedUrl)}
-          className="text-zinc-500 hover:text-zinc-700 transition-colors" 
+          className="text-zinc-400 hover:text-zinc-600 transition-colors"
           title="Copy Link"
         >
           <Copy size={14} />
         </button>
-        <button 
-          onClick={() => window.open(deployedUrl, '_blank', 'noopener,noreferrer')}
-          className="text-zinc-500 hover:text-brand transition-colors" 
+        <button
+          onClick={() => window.open(deployedUrl, "_blank")}
+          className="text-zinc-400 hover:text-brand transition-colors"
           title="Open in new tab"
         >
           <Globe size={14} />
@@ -1611,8 +2612,8 @@ function DeployDocumentBtn({ content }: { content: string }) {
   }
 
   return (
-    <button 
-      className="text-zinc-500 hover:text-brand transition-colors" 
+    <button
+      className="text-zinc-400 hover:text-brand transition-colors"
       title="Generate Shareable Link"
       onClick={handleDeploy}
       disabled={isDeploying}
@@ -1623,193 +2624,193 @@ function DeployDocumentBtn({ content }: { content: string }) {
 }
 
 function ChatMessageItem({ m }: { m: ChatMessage }) {
-  const isAI = m.role === 'model';
-  const renderText = isAI ? sanitizeConsumerSportsText(m.text) : m.text;
+  const isAI = m.role === "model";
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10 }}
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn("grid grid-cols-[1fr] gap-3 md:gap-4 max-w-3xl", !isAI && "ml-auto w-full md:w-auto")}
+      transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
+      className={cn(
+        "grid grid-cols-[1fr] gap-4 max-w-2xl",
+        !isAI && "ml-auto text-right",
+      )}
     >
       <div className="space-y-4">
-        <div className={cn("hidden md:flex items-center gap-3", !isAI && "justify-end")}>
-          <span className="text-[8px] font-bold uppercase tracking-[0.4em] text-zinc-500">
-            {isAI ? 'Analysis' : 'You'}
+        <div className={cn("flex items-center gap-3", !isAI && "justify-end")}>
+          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-400">
+            {isAI ? "Analysis" : "You"}
           </span>
-          <span className="w-1 h-1 bg-zinc-50 rounded-full" />
-          <span className="text-[8px] font-mono text-zinc-500 uppercase tabular-nums">06:05:26</span>
+          <span className="w-1 h-1 bg-zinc-200 rounded-full" />
+          <span className="text-[10px] font-mono text-zinc-300 uppercase tabular-nums">
+            {m.timestamp ? (
+              new Date(m.timestamp?.toMillis ? m.timestamp.toMillis() : m.timestamp).toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+                timeZone: "America/Los_Angeles"
+              })
+            ) : "LIVE"}
+          </span>
         </div>
-        <div className={cn(
-          "leading-[1.8] tracking-tight text-[15px] md:text-sm",
-          isAI
-            ? "text-zinc-800 md:text-zinc-700 prose prose-emerald max-w-none prose-sm font-normal"
-            : "ml-auto max-w-[88%] md:max-w-none rounded-3xl bg-ink text-white md:bg-transparent md:text-ink font-medium md:serif-italic text-base md:text-lg px-4 py-3 md:px-6 md:py-0 md:border-r md:border-brand/20 text-left"
-        )}>
+        <div
+          className={cn(
+            "text-base leading-relaxed tracking-tight",
+            isAI
+              ? "text-zinc-700 prose prose-zinc max-w-none prose-sm font-light"
+              : "text-zinc-900 font-medium text-xl md:text-2xl tracking-tighter",
+          )}
+        >
           {isAI ? (
-            <ReactMarkdown 
+            <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-              p: ({ children }) => <p className="mb-7 last:mb-0 text-zinc-700 leading-[1.85]">{children}</p>,
-              strong: ({ children }) => <strong className="text-ink font-semibold">{children}</strong>,
-              table: ({ children }) => (
-                <div className="w-full overflow-x-auto my-8 rounded-2xl border border-zinc-200/60 shadow-sm bg-white/50 backdrop-blur-sm">
-                  <table className="w-full text-left border-collapse text-sm">
+                p: ({ children }) => (
+                  <p className="mb-6 last:mb-0 text-zinc-700 leading-relaxed font-light">
                     {children}
-                  </table>
-                </div>
-              ),
-              thead: ({ children }) => <thead className="bg-zinc-50/50 border-b border-zinc-200/60">{children}</thead>,
-              tbody: ({ children }) => <tbody className="divide-y divide-zinc-100/60">{children}</tbody>,
-              tr: ({ children, isHeader, ...props }: any) => <tr className="hover:bg-zinc-50/80 transition-colors" {...props}>{children}</tr>,
-              th: ({ children }) => <th className="px-4 py-3 font-medium text-[10px] text-zinc-500 uppercase tracking-widest">{children}</th>,
-              td: ({ children }) => {
-                let numValue = NaN;
-                
-                // Attempt to parse string or array of strings into a number for heatmap coloring
-                const parseNum = (val: any) => {
-                  if (typeof val === 'string') {
-                    const numStr = val.replace(/[^0-9.-]/g, '');
-                    if (numStr && val.match(/^[-+]?[0-9]*\.?[0-9]+%?$/)) {
-                      return parseFloat(numStr);
-                    }
-                  }
-                  return NaN;
-                };
-
-                if (Array.isArray(children) && children.length === 1) {
-                  numValue = parseNum(children[0]);
-                } else {
-                  numValue = parseNum(children);
-                }
-                
-                let bgColor = 'transparent';
-                let textColor = 'inherit';
-                if (!isNaN(numValue)) {
-                  // Values > 0 get green, < 0 get red. This creates a really nice dynamic heatmap effect.
-                  if (numValue > 0) {
-                     const alpha = Math.min(Math.max(Math.abs(numValue) / 100, 0.02), 0.3);
-                     bgColor = `rgba(34, 197, 94, ${alpha})`;
-                     if (alpha > 0.15) textColor = '#064e3b';
-                  } else if (numValue < 0) {
-                     const alpha = Math.min(Math.max(Math.abs(numValue) / 100, 0.02), 0.3);
-                     bgColor = `rgba(239, 68, 68, ${alpha})`;
-                     if (alpha > 0.15) textColor = '#7f1d1d';
-                  }
-                }
-                
-                return (
-                  <td 
-                    className="px-4 py-3 font-mono text-[11px] tabular-nums whitespace-nowrap transition-colors"
-                    style={{ backgroundColor: bgColor, color: textColor !== 'inherit' ? textColor : undefined }}
+                  </p>
+                ),
+                strong: ({ children }) => (
+                  <strong className="text-zinc-900 font-semibold">{children}</strong>
+                ),
+                table: ({ children }) => (
+                  <div className="w-full overflow-x-auto my-6 rounded-2xl border border-zinc-200 bg-zinc-50/50 backdrop-blur-sm">
+                    <table className="w-full text-left border-collapse text-sm">
+                      {children}
+                    </table>
+                  </div>
+                ),
+                thead: ({ children }) => (
+                  <thead className="bg-white/50 border-b border-zinc-200">
+                    {children}
+                  </thead>
+                ),
+                tbody: ({ children }) => (
+                  <tbody className="divide-y divide-zinc-200">
+                    {children}
+                  </tbody>
+                ),
+                tr: ({ children, isHeader, ...props }: any) => (
+                  <tr
+                    className="hover:bg-zinc-100/50 transition-colors"
+                    {...props}
                   >
                     {children}
-                  </td>
-                );
-              },
-              code: ({ inline, className, children, ...props }: any) => {
-                const match = /language-(\w+)/.exec(className || '');
-                
-                const extractText = (node: any): string => {
-                  if (typeof node === 'string') return node;
-                  if (typeof node === 'number') return String(node);
-                  if (Array.isArray(node)) return node.map(extractText).join('');
-                  if (node && typeof node === 'object' && node.props && node.props.children) {
-                    return extractText(node.props.children);
-                  }
-                  return '';
-                };
-                
-                const codeString = extractText(children).replace(/\n$/, '');
+                  </tr>
+                ),
+                th: ({ children }) => (
+                  <th className="px-5 py-3 font-semibold text-[10px] text-zinc-500 uppercase tracking-widest border-r border-zinc-200 last:border-r-0">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }) => {
+                  let numValue = NaN;
 
-                if (!inline && match) {
-                  if (match[1] === 'html') {
-                    return (
-                      <div className="my-8 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-                        <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50/50 px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <FileText size={14} className="text-zinc-500" />
-                            <span className="font-mono text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                              Document Artifact
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <DeployDocumentBtn content={codeString} />
-                            <button 
-                              className="text-zinc-500 hover:text-zinc-700 transition-colors" 
-                              title="Copy HTML"
-                              onClick={() => navigator.clipboard.writeText(codeString)}
-                            >
-                              <Copy size={14} />
-                            </button>
-                            <button 
-                              className="text-zinc-500 hover:text-zinc-700 transition-colors" 
-                              title="Show Source"
-                              onClick={(e) => {
-                                const el = (e.target as HTMLElement).closest('.rounded-xl')?.querySelector('.raw-source');
-                                el?.classList.toggle('hidden');
-                              }}
-                            >
-                              <Code size={14} />
-                            </button>
-                          </div>
-                        </div>
-                        <div className="p-0 w-full overflow-hidden flex flex-col bg-zinc-100 items-center py-8">
-                          <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[500px] relative">
-                            <iframe 
-                               srcDoc={codeString} 
-                               className="w-full h-full min-h-[500px] border-none"
-                               sandbox=""
-                               referrerPolicy="no-referrer"
-                            />
-                            <div className="raw-source hidden absolute inset-0 bg-black/90 p-6 overflow-auto">
-                              <pre className="text-zinc-300 text-xs font-mono whitespace-pre-wrap">{codeString}</pre>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
+                  // Attempt to parse string or array of strings into a number for heatmap coloring
+                  const parseNum = (val: any) => {
+                    if (typeof val === "string") {
+                      const numStr = val.replace(/[^0-9.-]/g, "");
+                      if (numStr && val.match(/^[-+]?[0-9]*\.?[0-9]+%?$/)) {
+                        return parseFloat(numStr);
+                      }
+                    }
+                    return NaN;
+                  };
+
+                  if (Array.isArray(children) && children.length === 1) {
+                    numValue = parseNum(children[0]);
+                  } else {
+                    numValue = parseNum(children);
+                  }
+
+                  let bgColor = "transparent";
+                  let textColor = "inherit";
+                  if (!isNaN(numValue)) {
+                    // Values > 0 get green, < 0 get red. This creates a really nice dynamic heatmap effect.
+                    if (numValue > 0) {
+                      const alpha = Math.min(
+                        Math.max(Math.abs(numValue) / 100, 0.05),
+                        0.3,
+                      );
+                      bgColor = `rgba(34, 197, 94, ${alpha})`;
+                      if (alpha > 0.2) textColor = "#064e3b";
+                    } else if (numValue < 0) {
+                      const alpha = Math.min(
+                        Math.max(Math.abs(numValue) / 100, 0.05),
+                        0.3,
+                      );
+                      bgColor = `rgba(239, 68, 68, ${alpha})`;
+                      if (alpha > 0.2) textColor = "#7f1d1d";
+                    }
                   }
 
                   return (
-                    <div className="my-8 overflow-hidden rounded-xl border border-zinc-200 bg-[#1c1917] shadow-sm">
-                      <div className="flex items-center justify-between border-b border-zinc-800 bg-[#292524] px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <TerminalSquare size={14} className="text-zinc-300" />
-                          <span className="font-mono text-[11px] font-medium text-zinc-300 uppercase tracking-wider">
-                            {match[1]} Artifact // Analytical Model
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button 
-                            className="text-zinc-300 hover:text-white transition-colors" 
-                            title="Copy code"
-                            onClick={() => navigator.clipboard.writeText(codeString)}
-                          >
-                            <Copy size={14} />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="p-4 overflow-x-auto text-[13px]">
-                        <SyntaxHighlighter
-                          {...props}
-                          style={vscDarkPlus}
-                          language={match[1]}
-                          PreTag="div"
-                          customStyle={{ margin: 0, padding: 0, background: 'transparent' }}
-                        >
-                          {codeString}
-                        </SyntaxHighlighter>
-                      </div>
-                    </div>
+                    <td
+                      className="px-5 py-3 font-mono text-[12px] tabular-nums whitespace-nowrap transition-colors border-r border-zinc-200 last:border-r-0"
+                      style={{
+                        backgroundColor: bgColor,
+                        color: textColor !== "inherit" ? textColor : undefined,
+                      }}
+                    >
+                      {children}
+                    </td>
                   );
-                }
-                return <code className="bg-zinc-50 px-1 py-0.5 rounded font-mono text-[10px] text-zinc-800 border border-zinc-100"{...props}>{children}</code>;
-              }
-            }}>
-              {renderText}
+                },
+                code: ({ inline, className, children, ...props }: any) => {
+                  const match = /language-(\w+)/.exec(className || "");
+
+                  const extractText = (node: any): string => {
+                    if (typeof node === "string") return node;
+                    if (typeof node === "number") return String(node);
+                    if (Array.isArray(node))
+                      return node.map(extractText).join("");
+                    if (
+                      node &&
+                      typeof node === "object" &&
+                      node.props &&
+                      node.props.children
+                    ) {
+                      return extractText(node.props.children);
+                    }
+                    return "";
+                  };
+
+                  const codeString = extractText(children).replace(/\n$/, "");
+
+                  if (!inline && match) {
+                    if (match[1] === "html") {
+                      return <HtmlArtifactBlock codeString={codeString} />;
+                    }
+
+                    return (
+                        <div className="my-6 rounded-2xl bg-[#F4F4F5] border border-zinc-200 p-4 font-mono text-[12px] overflow-x-auto text-zinc-900 shadow-sm">
+                            <div className="flex items-center justify-between border-b border-zinc-800/10 mb-2 pb-2">
+                                <span className="font-mono text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                                    {match[1]}
+                                </span>
+                            </div>
+                            <pre className="overflow-x-auto">
+                              <code className={className} {...props}>
+                                {children}
+                              </code>
+                            </pre>
+                        </div>
+                    );
+                  }
+                  return (
+                    <code className="text-[12px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800 font-mono" {...props}>
+                      {children}
+                    </code>
+                  );
+                },
+              }}
+            >
+              {m.text}
             </ReactMarkdown>
           ) : (
-            renderText
+            <div className="text-zinc-900 font-normal tracking-tight">
+              {m.text}
+            </div>
           )}
         </div>
       </div>
@@ -1817,238 +2818,567 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
   );
 }
 
-function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
+function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () => void; oddsSource?: "sportsbook" | "prediction" }) {
   const getLogo = getEspnLogo;
-  const homePrice = odd.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.find(o => o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name))?.price || 0;
-  const awayPrice = odd.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.find(o => o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name))?.price || 0;
-  const totalsInfo = odd.bookmakers?.[0]?.markets?.find(m => m.key === 'totals');
-  const totalPoint = totalsInfo?.outcomes?.find(o => o.name === 'Over')?.point || "-";
+  const homePrice =
+    odd.bookmakers?.[0]?.markets
+      ?.find((m) => m.key === "h2h")
+      ?.outcomes?.find(
+        (o) =>
+          o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name) || o.name?.includes("Yes"),
+      )?.price || 0;
+  const awayPrice =
+    odd.bookmakers?.[0]?.markets
+      ?.find((m) => m.key === "h2h")
+      ?.outcomes?.find(
+        (o) =>
+          o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name) || o.name?.includes("No"),
+      )?.price || 0;
+  const totalsInfo = odd.bookmakers?.[0]?.markets?.find(
+    (m) => m.key === "totals",
+  );
+  const totalPoint =
+    totalsInfo?.outcomes?.find((o) => o.name === "Over")?.point || "-";
 
   return (
-    <button 
+    <button
       onClick={onClick}
-      className="block relative outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 rounded-2xl w-full text-left"
+      className="block relative outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-2 rounded-[2rem] w-full text-left"
     >
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+      <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        whileHover={{ y: -4, transition: { duration: 0.3, ease: "easeOut" } }}
         className={cn(
-          "bg-white border rounded-2xl p-5 sm:p-6 space-y-6 group transition-all cursor-pointer h-full card-hover",
-          odd.status === 'live' ? "border-brand/40 bg-brand/5" : "border-zinc-100 hover:border-zinc-200"
+          "bg-white border rounded-[2rem] overflow-hidden flex flex-col group transition-all duration-300 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] cursor-pointer h-full border-zinc-200/60",
+          odd.status === "live" && "ring-1 ring-red-500/20 border-red-500/20",
         )}
       >
-        <div className="flex justify-between items-start">
-           <div className="space-y-1 flex items-center gap-3">
-              {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
-              <span className="text-[8px] text-zinc-500 uppercase tracking-[0.4em] font-bold">
-                 {odd.sport_title} {odd.status === 'live' ? '• LIVE' : odd.status === 'final' ? '• FINAL' : `• ${new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`}
-              </span>
-           </div>
-        </div>
-        <div>
-           <h4 className="text-2xl serif-italic font-medium text-ink tracking-tight">{odd.away_team.split(' ').pop()} @ {odd.home_team.split(' ').pop()}</h4>
-        </div>
-
-        <div className="space-y-6">
-         {odd.bookmakers?.length ? (
-           <>
-             <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
-               <img src={getLogo(odd.home_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
-               <div className="flex flex-col">
-                 <span className="text-xs font-semibold text-ink">{odd.home_team}</span>
-                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">Moneyline / Spread / Total</span>
-               </div>
-               <PriceTag price={homePrice} />
-             </div>
-
-             <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
-               <img src={getLogo(odd.away_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
-               <div className="flex flex-col">
-                 <span className="text-xs font-semibold text-ink">{odd.away_team}</span>
-                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">Moneyline / Spread / Total</span>
-               </div>
-               <PriceTag price={awayPrice} />
-             </div>
-           </>
-         ) : (
-           <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-3 py-4">
-             <span className="text-[10px] uppercase tracking-widest text-zinc-500">
-               {describeOddsLine(odd) || "ESPN checked. Market line not found yet."}
-             </span>
-           </div>
-         )}
-
-         {/* Pitcher Matchup */}
-         {(odd.home_pitcher || odd.away_pitcher) && (
-           <div className="w-full mt-6 pt-6 border-t border-zinc-50 transition-opacity">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-1.5 h-1.5 rotate-45 bg-[#2D4A3E] shrink-0 opacity-80" />
-              <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Pitching Matchup</span>
+        {/* Atmosphere Header */}
+        <div className="bg-zinc-50/80 border-b border-zinc-100 px-6 py-4 flex items-center justify-between text-[10px] uppercase tracking-widest font-bold text-zinc-400">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-zinc-200/50 shadow-sm">
+              {odd.status === "live" ? (
+                 <span className="text-red-500 flex items-center gap-1.5 font-mono">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  LIVE
+                </span>
+              ) : (
+                <span className="text-zinc-600 font-mono">
+                  {new Date(odd.commence_time).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-              <PitcherDisplay 
-                teamFull={odd.away_team} 
-                name={odd.away_pitcher} 
-                headshot={odd.away_pitcher_headshot} 
-                record={odd.away_pitcher_record} 
+            <div className="flex items-center gap-2 group-hover:text-zinc-800 transition-colors">
+              <span className="truncate max-w-[140px] text-xs">{odd.venue}</span>
+            </div>
+          </div>
+          {odd.weather && odd.status !== "live" && (
+            <div className="hidden md:flex items-center gap-4 bg-zinc-100/80 px-4 py-1.5 rounded-full border border-zinc-200/60">
+              <div className="flex items-center gap-2 text-zinc-600">
+                <span>{odd.weather.display}</span>
+              </div>
+              {odd.weather.wind && (
+                <div className="flex items-center gap-2 border-l border-zinc-200 pl-3 text-zinc-500">
+                  <span>{odd.weather.wind}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Core Matchup */}
+        <div className="p-8 xl:p-10 space-y-10 flex-1 bg-white">
+          <div className="relative">
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[60%] font-serif-italic text-sm text-zinc-300 pointer-events-none select-none z-10 flex flex-col items-center justify-center">
+              at
+            </div>
+            <div className="grid grid-cols-2 gap-16">
+              {/* Away Team */}
+              <div className="flex flex-col items-center text-center space-y-6">
+                <div className="relative group/logo">
+                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-125 blur-xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
+                  <img
+                    src={getLogo(odd.away_team)}
+                    className="relative w-24 h-24 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-3.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                    alt={odd.away_team}
+                  />
+                  {odd.status === "live" &&
+                    parseInt(odd.away_score || "0") >
+                      parseInt(odd.home_score || "0") && (
+                      <div className="absolute top-0 right-0 w-4 h-4 bg-zinc-900 rounded-full border-[3px] border-white shadow-sm z-10" />
+                    )}
+                </div>
+                <div>
+                  <h3 className="text-2xl serif font-medium text-zinc-900 tracking-tight mb-2">
+                    {odd.away_team.split(" ").pop()}
+                  </h3>
+                  <div className="flex flex-col items-center gap-2">
+                    {odd.away_score && (
+                      <span className="text-3xl font-bold text-zinc-900 tracking-tighter block font-mono">
+                        {odd.away_score}
+                      </span>
+                    )}
+                    {awayPrice !== 0 && <PriceTag price={awayPrice} />}
+                  </div>
+                </div>
+              </div>
+
+              {/* Home Team */}
+              <div className="flex flex-col items-center text-center space-y-6">
+                <div className="relative group/logo">
+                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-125 blur-xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
+                  <img
+                    src={getLogo(odd.home_team)}
+                    className="relative w-24 h-24 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-3.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                    alt={odd.home_team}
+                  />
+                  {odd.status === "live" &&
+                    parseInt(odd.home_score || "0") >
+                      parseInt(odd.away_score || "0") && (
+                      <div className="absolute top-0 right-0 w-4 h-4 bg-zinc-900 rounded-full border-[3px] border-white shadow-sm z-10" />
+                    )}
+                </div>
+                <div>
+                  <h3 className="text-2xl serif font-medium text-zinc-900 tracking-tight mb-2">
+                    {odd.home_team.split(" ").pop()}
+                  </h3>
+                  <div className="flex flex-col items-center gap-2">
+                    {odd.home_score && (
+                      <span className="text-3xl font-bold text-zinc-900 tracking-tighter block font-mono">
+                        {odd.home_score}
+                      </span>
+                    )}
+                    {homePrice !== 0 && <PriceTag price={homePrice} />}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Matchup Narrative Context */}
+          {odd.status !== "live" && (
+            <div className="bg-zinc-50 rounded-[1.25rem] p-6 border border-zinc-200/50 flex flex-col gap-4">
+               <div className="flex items-center justify-between font-mono">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-widest">Environment Analysis</span>
+                  </div>
+               </div>
+               <p className="text-sm text-zinc-600 leading-relaxed font-serif">
+                  Playing at <span className="text-zinc-900 font-medium">{odd.location}</span>. {odd.venue_factor}. 
+                  {odd.weather ? ` ${odd.weather.display}${odd.weather.wind ? ` with ${odd.weather.wind}` : ''}.` : ''}
+                </p>
+            </div>
+          )}
+
+          {/* Institutional Data Row */}
+          <div className={cn(
+            "grid gap-3 bg-zinc-50/50 p-2 rounded-3xl border border-zinc-200/40",
+            (odd.status === "live" && odd.situation_detail) ? "grid-cols-1" : (totalPoint !== "-" ? "grid-cols-3" : "grid-cols-2")
+          )}>
+            {odd.status === "live" && odd.situation_detail ? (
+              <div className="flex items-center justify-between px-6 py-4 bg-white rounded-[1.25rem] border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">B</span>
+                    <div className="flex gap-1">
+                      {[1,2,3,4].map(b => <span key={b} className={cn("w-2 h-2 rounded-full transition-colors border", b <= odd.situation_detail!.balls ? "bg-[#2D4A3E] border-[#2D4A3E]" : "bg-white border-zinc-200")} />)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">S</span>
+                    <div className="flex gap-1">
+                      {[1,2,3].map(s => <span key={s} className={cn("w-2 h-2 rounded-full transition-colors border", s <= odd.situation_detail!.strikes ? "bg-red-500 border-red-500" : "bg-white border-zinc-200")} />)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">O</span>
+                    <div className="flex gap-1">
+                      {[1,2,3].map(o => <span key={o} className={cn("w-2 h-2 rounded-full transition-colors border", o <= odd.situation_detail!.outs ? "bg-red-500 border-red-500" : "bg-white border-zinc-200")} />)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="relative w-20 h-20 transform rotate-45 origin-center bg-zinc-50/50 rounded shadow-inner overflow-hidden border border-zinc-200">
+                  <div className="absolute inset-2 border-[2px] border-zinc-200/60 rounded-sm" />
+                  
+                  {/* Field Lines */}
+                  <div className="absolute top-1/2 left-1/2 w-[140%] h-px bg-zinc-200 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
+                  <div className="absolute top-1/2 left-1/2 h-[140%] w-px bg-zinc-200 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
+                  
+                  {/* Home */}
+                  <div className="absolute bottom-[-4px] left-[-4px] w-4 h-4 bg-white rounded-sm border-[2px] border-zinc-300 shadow-md transform rotate-45 z-10" />
+                  
+                  {/* First Base */}
+                  <div className={cn("absolute bottom-[-3px] right-[-3px] w-4 h-4 transition-all duration-500 border-[2px] rounded-sm", odd.situation_detail.onFirst ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_10px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
+                  
+                  {/* Second Base */}
+                  <div className={cn("absolute top-[-3px] right-[-3px] w-4 h-4 transition-all duration-500 border-[2px] rounded-sm", odd.situation_detail.onSecond ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_10px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
+                  
+                  {/* Third Base */}
+                  <div className={cn("absolute top-[-3px] left-[-3px] w-4 h-4 transition-all duration-500 border-[2px] rounded-sm", odd.situation_detail.onThird ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_10px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
+
+                  {/* Pitcher Mound */}
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center z-10 shadow-inner">
+                    <div className="w-3 h-[2px] bg-white border border-zinc-200 rotate-[-45deg] rounded-sm shadow-sm" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {totalPoint !== "-" && (
+                  <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
+                    <span className="block text-[9px] uppercase font-bold text-zinc-400 tracking-[0.2em] mb-2">
+                      Totals
+                    </span>
+                    <span className="text-sm font-mono font-medium text-zinc-800">
+                      O/U {totalPoint}
+                    </span>
+                  </div>
+                )}
+                <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
+                  <span className="block text-[9px] uppercase font-bold text-zinc-400 tracking-[0.2em] mb-2">
+                    Series
+                  </span>
+                  <span className="text-[12px] font-medium text-zinc-800 leading-tight block whitespace-break-spaces">
+                    {odd.series_history || "No Data"}
+                  </span>
+                </div>
+                <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
+                  <span className="block text-[9px] uppercase font-bold text-zinc-400 tracking-[0.2em] mb-2">
+                    Bullpen
+                  </span>
+                  <div className={cn(
+                    "flex items-center justify-center text-xs font-bold text-center",
+                    odd.bullpen_rating === "ELITE" ? "text-blue-600" : odd.bullpen_rating === "STUNTED" ? "text-red-500" : "text-zinc-600"
+                  )}>
+                    {odd.bullpen_rating}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Pitching Narrative */}
+          <div className="pt-2">
+            <div className="grid grid-cols-2 gap-12 relative">
+              <div className="absolute left-1/2 top-0 bottom-0 w-px bg-zinc-100/80 -translate-x-1/2" />
+              <PitcherDisplay
+                teamFull={odd.away_team}
+                name={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.name : odd.away_pitcher}
+                headshot={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.headshot : odd.away_pitcher_headshot}
+                record={odd.status === "live" && odd.away_live_pitcher ? getPitcherLiveStats(odd.away_live_pitcher) : odd.away_pitcher_record}
+                small
               />
-              <PitcherDisplay 
-                teamFull={odd.home_team} 
-                name={odd.home_pitcher} 
-                headshot={odd.home_pitcher_headshot} 
-                record={odd.home_pitcher_record} 
-                alignRight 
+              <PitcherDisplay
+                teamFull={odd.home_team}
+                name={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.name : odd.home_pitcher}
+                headshot={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.headshot : odd.home_pitcher_headshot}
+                record={odd.status === "live" && odd.home_live_pitcher ? getPitcherLiveStats(odd.home_live_pitcher) : odd.home_pitcher_record}
+                alignRight
+                small
               />
             </div>
           </div>
-         )}
-      </div>
+        </div>
 
-      <div className="pt-6 border-t border-zinc-50">
-         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-8">
-            {odd.bookmakers?.length ? (
-            <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">Total</span>
-               <span className="font-mono text-xs font-bold text-zinc-500">{totalPoint}</span>
-            </div>
-            ) : null}
-            <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.away_team.split(' ').pop()} Last 10</span>
-               <span className="font-mono text-xs font-bold text-zinc-500">6-4 U</span>
-            </div>
-            <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.home_team.split(' ').pop()} Last 10</span>
-               <span className="font-mono text-xs font-bold text-zinc-500">7-3 U</span>
-            </div>
-         </div>
+        {/* Narrative Pulse Footer */}
+        <div className="py-4 px-6 bg-zinc-900 text-white font-mono text-[10px] flex items-center justify-center text-center">
+          <div className="flex-1 leading-relaxed opacity-95 overflow-hidden line-clamp-2">
+            <span className="text-zinc-400 font-bold mr-2 uppercase tracking-[0.2em]">
+              TREND:
+            </span>
+            {odd.trend_story}
+          </div>
+        </div>
+      </motion.div>
+    </button>
+  );
+}
+
+function MobileNavIcon({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex flex-col items-center justify-center transition-all duration-500 py-1 flex-1 md:flex-none outline-none relative group md:px-4",
+        active ? "text-ink" : "text-zinc-400"
+      )}
+    >
+      <div className="flex flex-col items-center">
+        <span className={cn(
+          "text-[10px] uppercase font-black tracking-[0.3em] transition-all duration-500 ease-out",
+          active ? "opacity-100 scale-110" : "opacity-30 scale-100"
+        )}>
+          {label}
+        </span>
+        {active && (
+          <motion.div
+            layoutId="mobile-nav-indicator"
+            className="absolute -bottom-2 w-1 h-1 bg-brand rounded-full"
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+          />
+        )}
       </div>
-    </motion.div>
     </button>
   );
 }
 
 function PriceTag({ price }: { price: number | string }) {
-  if (price === 0 || price === "N/A" || !price) return <span className="opacity-0">-</span>;
-  const displayPrice = typeof price === 'number' ? (price > 0 ? `+${price}` : price.toString()) : price;
-  
+  if (price === 0 || price === "N/A" || !price)
+    return <span className="opacity-0">-</span>;
+  const displayPrice =
+    typeof price === "number"
+      ? price > 0
+        ? `+${price}`
+        : price.toString()
+      : price;
+
+  const isPositive = typeof price === "number" ? price > 0 : price.toString().startsWith('+');
+
   return (
-    <div className="font-mono font-medium text-sm text-ink tracking-tight bg-white shadow-sm border border-zinc-100 rounded-md px-2 py-1 min-w-[50px] text-center">
-       {displayPrice}
+    <div className={cn(
+      "font-mono font-bold text-[10px] uppercase tracking-tight ring-1 ring-inset px-2.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all",
+      isPositive 
+        ? "bg-emerald-50 text-emerald-700 ring-emerald-600/10" 
+        : "bg-white text-zinc-600 ring-zinc-200"
+    )}>
+      {displayPrice}
     </div>
   );
 }
 
-function GameDetailView({ odds }: { odds: SportOdds[] }) {
+function GameDetailView({ odds, oddsSource }: { odds: SportOdds[], oddsSource?: "sportsbook" | "prediction" }) {
   const { gameId } = useParams();
-  const odd = odds.find(o => o.id === gameId);
+  const odd = odds.find((o) => o.id === gameId);
   const navigate = useNavigate();
 
-  const homePrice = odd?.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.find(o => o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name))?.price || 0;
-  const awayPrice = odd?.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.find(o => o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name))?.price || 0;
-  const totalsInfo = odd?.bookmakers?.[0]?.markets?.find(m => m.key === 'totals');
-  const totalPoint = totalsInfo?.outcomes?.find(o => o.name === 'Over')?.point || "-";
+  const homePrice =
+    odd?.bookmakers?.[0]?.markets
+      ?.find((m) => m.key === "h2h")
+      ?.outcomes?.find(
+        (o) =>
+          o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name) || o.name?.includes("Yes"),
+      )?.price || 0;
+  const awayPrice =
+    odd?.bookmakers?.[0]?.markets
+      ?.find((m) => m.key === "h2h")
+      ?.outcomes?.find(
+        (o) =>
+          o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name) || o.name?.includes("No"),
+      )?.price || 0;
+  const totalsInfo = odd?.bookmakers?.[0]?.markets?.find(
+    (m) => m.key === "totals",
+  );
+  const totalPoint =
+    totalsInfo?.outcomes?.find((o) => o.name === "Over")?.point || "-";
 
   if (!odd) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-500">
+      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-400">
         <p>Game not found.</p>
-        <button className="mt-4 text-brand hover:underline" onClick={() => navigate('/')}>Back to Board</button>
+        <button
+          className="mt-4 text-brand hover:underline"
+          onClick={() => navigate("/")}
+        >
+          Back to Board
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar p-4 sm:p-6 xl:p-10 bg-white">
+    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 bg-white">
       <div className="max-w-4xl mx-auto w-full">
-        <button className="text-[10px] items-center flex gap-2 font-bold uppercase tracking-widest text-zinc-500 hover:text-ink mb-8 transition-colors" onClick={() => navigate('/')}>
+        <button
+          className="text-[10px] items-center flex gap-2 font-bold uppercase tracking-widest text-zinc-400 hover:text-ink mb-8 md:mb-12 transition-colors"
+          onClick={() => navigate("/")}
+        >
           <ChevronRight size={14} className="rotate-180" /> Back to Daily Board
         </button>
 
-        <h1 className="text-3xl sm:text-5xl font-medium serif-italic text-ink mb-6">{odd.away_team} @ {odd.home_team}</h1>
-        
-        <div className="flex items-center gap-4 mb-12">
-           <span className={cn("px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest", odd.status === 'live' ? "bg-brand text-white animate-pulse" : "bg-zinc-100 text-zinc-500")}>
-             {odd.status === 'live' ? 'LIVE' : (odd.status === 'final' ? 'FINAL' : 'UPCOMING')}
-           </span>
-           <span className="text-sm font-mono text-zinc-500">{new Date(odd.commence_time).toLocaleString()} • {odd.venue || "TBA"}</span>
+        <h1 className="text-3xl md:text-5xl font-medium serif-italic text-ink mb-6">
+          {odd.away_team} @ {odd.home_team}
+        </h1>
+
+        <div className="flex flex-wrap items-center gap-4 mb-8 md:mb-12 relative">
+          <span
+            className={cn(
+              "px-4 py-1 rounded-full text-[10px] md:text-xs font-bold uppercase tracking-widest whitespace-nowrap",
+              odd.status === "live"
+                ? "bg-brand text-white animate-pulse"
+                : "bg-zinc-100 text-zinc-500",
+            )}
+          >
+            {odd.status === "live"
+              ? "LIVE"
+              : odd.status === "final"
+                ? "FINAL"
+                : "UPCOMING"}
+          </span>
+          <span className="text-[11px] md:text-sm font-mono text-zinc-500">
+            {new Date(odd.commence_time).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} •{" "}
+            {odd.venue || "TBA"}
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 border-t border-zinc-100 pt-10">
-            <div className="flex flex-col gap-6">
-                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Away Side</span>
-                <div className="flex items-center gap-4">
-                  <img src={getEspnLogo(odd.away_team)} className="w-16 h-16 rounded-full border border-zinc-100" alt="" />
-                  <div>
-                     <div className="flex items-center gap-3">
-                       <h3 className="text-2xl serif text-ink">{odd.away_team}</h3>
-                       <PriceTag price={awayPrice} />
-                     </div>
-                     <p className="font-mono text-zinc-500 mt-1">{odd.score ? `Score: ${odd.away_score}` : ''}</p>
-                  </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 border-t border-zinc-100 pt-8 md:pt-12">
+          <div className="flex flex-col gap-6">
+            <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest">
+              Away Side
+            </span>
+            <div className="flex items-center gap-4">
+              <img
+                src={getEspnLogo(odd.away_team)}
+                className="w-12 h-12 md:w-16 md:h-16 rounded-full border border-zinc-100"
+                alt=""
+              />
+              <div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <h3 className="text-xl md:text-2xl serif text-ink">{odd.away_team}</h3>
+                  {awayPrice !== 0 && <PriceTag price={awayPrice} />}
                 </div>
+                <p className="font-mono text-zinc-500 mt-1 text-xs">
+                  {odd.away_score ? `Score: ${odd.away_score}` : ""}
+                </p>
+              </div>
             </div>
-            <div className="flex flex-col gap-6 text-right items-end">
-                 <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Home Side</span>
-                 <div className="flex items-center gap-4 flex-row-reverse">
-                   <img src={getEspnLogo(odd.home_team)} className="w-16 h-16 rounded-full border border-zinc-100" alt="" />
-                   <div className="flex flex-col items-end">
-                       <div className="flex items-center gap-3 flex-row-reverse">
-                         <h3 className="text-2xl serif text-ink">{odd.home_team}</h3>
-                         <PriceTag price={homePrice} />
-                       </div>
-                       <p className="font-mono text-zinc-500 mt-1">{odd.score ? `Score: ${odd.home_score}` : ''}</p>
-                   </div>
-                 </div>
+          </div>
+          <div className="flex flex-col gap-6 text-left md:text-right md:items-end">
+            <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest">
+              Home Side
+            </span>
+            <div className="flex items-center gap-4 md:flex-row-reverse">
+              <img
+                src={getEspnLogo(odd.home_team)}
+                className="w-12 h-12 md:w-16 md:h-16 rounded-full border border-zinc-100"
+                alt=""
+              />
+              <div className="flex flex-col md:items-end">
+                <div className="flex flex-wrap items-center gap-3 md:flex-row-reverse">
+                  <h3 className="text-xl md:text-2xl serif text-ink">{odd.home_team}</h3>
+                  {homePrice !== 0 && <PriceTag price={homePrice} />}
+                </div>
+                <p className="font-mono text-zinc-500 mt-1 text-xs">
+                  {odd.home_score ? `Score: ${odd.home_score}` : ""}
+                </p>
+              </div>
             </div>
-        </div>
-
-        <div className="flex justify-center mt-8 mb-4">
-          <div className="bg-zinc-50 border border-zinc-100 rounded-lg px-4 sm:px-6 py-4 flex items-center gap-6 sm:gap-12 font-mono text-sm">
-             <div className="flex flex-col items-center">
-                 <span className="text-[10px] text-zinc-500 font-sans font-bold uppercase mb-1">Total</span>
-                 <span className="text-ink font-bold">{totalPoint !== "-" ? `O/U ${totalPoint}` : "N/A"}</span>
-             </div>
-             <div className="flex flex-col items-center">
-                 <span className="text-[10px] text-zinc-500 font-sans font-bold uppercase mb-1">Status</span>
-                 <span className="text-brand font-bold">{odd.status === 'final' ? 'Final' : (odd.situation || 'Pregame')}</span>
-             </div>
           </div>
         </div>
 
-        {(odd.away_pitcher || odd.home_pitcher) && (
-            <div className="mt-10 sm:mt-16 bg-zinc-50 p-6 sm:p-8 rounded-xl border border-zinc-100">
-               <h3 className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500 mb-8 flex items-center gap-3">
-                 <div className="w-2 h-2 rotate-45 bg-[#2D4A3E]" />
-                 Pitching Matchup
-               </h3>
-               
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 items-start">
-                   <div className="flex flex-col gap-2">
-                       <span className="text-sm font-bold text-zinc-500 uppercase">{odd.away_team.split(' ').pop()} (A)</span>
-                       <div className="flex items-center gap-3">
-                         <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
-                           <img src={odd.away_pitcher_headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.away_pitcher || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`} alt={odd.away_pitcher} className="w-full h-full object-cover scale-110" />
-                         </div>
-                         <div className="flex flex-col">
-                           <span className="text-2xl font-serif text-ink tracking-tight">{odd.away_pitcher || "TBA"}</span>
-                           <span className="font-mono text-sm text-zinc-500">{odd.away_pitcher_record || "No record data"}</span>
-                         </div>
-                       </div>
-                   </div>
-                   <div className="flex flex-col gap-2 text-right items-end">
-                       <span className="text-sm font-bold text-zinc-500 uppercase">{odd.home_team.split(' ').pop()} (H)</span>
-                       <div className="flex items-center gap-3 flex-row-reverse">
-                         <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
-                           <img src={odd.home_pitcher_headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.home_pitcher || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`} alt={odd.home_pitcher} className="w-full h-full object-cover scale-110" />
-                         </div>
-                         <div className="flex flex-col text-right">
-                           <span className="text-2xl font-serif text-ink tracking-tight">{odd.home_pitcher || "TBA"}</span>
-                           <span className="font-mono text-sm text-zinc-500">{odd.home_pitcher_record || "No record data"}</span>
-                         </div>
-                       </div>
-                   </div>
-               </div>
+        <div className="flex justify-center mt-8 mb-4">
+          <div className="bg-zinc-50 border border-zinc-100 rounded-lg px-4 md:px-6 py-4 flex flex-col md:flex-row items-center gap-6 md:gap-12 font-mono text-sm w-full md:w-auto">
+            {totalPoint !== "-" && (
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] text-zinc-400 font-sans font-bold uppercase mb-1">
+                  Total
+                </span>
+                <span className="text-ink font-bold">
+                  O/U {totalPoint}
+                </span>
+              </div>
+            )}
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] text-zinc-400 font-sans font-bold uppercase mb-1">
+                Status
+              </span>
+              <span className="text-brand font-bold">
+                {odd.status === "final" ? "Final" : odd.situation || "Pregame"}
+              </span>
             </div>
+          </div>
+        </div>
+
+        <div className="mt-8 mb-12">
+            <BaseballDiamond 
+              status={odd.status || "upcoming"}
+              awayTeam={odd.away_team}
+              homeTeam={odd.home_team}
+              awayScore={odd.away_score}
+              homeScore={odd.home_score}
+              inning={odd.inning}
+              inningHalf={odd.inning_half}
+              situationDetail={odd.situation_detail}
+            />
+        </div>
+
+        {(odd.away_pitcher || odd.home_pitcher) && (
+          <div className="mt-16 bg-zinc-50 p-8 rounded-xl border border-zinc-100">
+            <h3 className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-400 mb-8 flex items-center gap-3">
+              <div className="w-2 h-2 rotate-45 bg-[#2D4A3E]" />
+              {odd.status === "live" ? "Current Pitching" : "Starting Pitching Matchup"}
+            </h3>
+
+            <div className="grid grid-cols-2 gap-8 items-start">
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-bold text-zinc-400 uppercase">
+                  {odd.away_team.split(" ").pop()} (A)
+                </span>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                    <img
+                      src={
+                        ((odd.status === "live" && odd.away_live_pitcher?.headshot) 
+                          ? odd.away_live_pitcher.headshot 
+                          : odd.away_pitcher_headshot) ||
+                        `https://api.dicebear.com/7.x/initials/svg?seed=${odd.away_pitcher || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`
+                      }
+                      alt={(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
+                      className="w-full h-full object-cover scale-110"
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-2xl font-serif text-ink tracking-tight">
+                      {(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
+                    </span>
+                    <span className="font-mono text-sm text-zinc-500">
+                      {(odd.status === "live" && odd.away_live_pitcher) ? getPitcherLiveStats(odd.away_live_pitcher) : (odd.away_pitcher_record || "No record data")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 text-right items-end">
+                <span className="text-sm font-bold text-zinc-400 uppercase">
+                  {odd.home_team.split(" ").pop()} (H)
+                </span>
+                <div className="flex items-center gap-3 flex-row-reverse">
+                  <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                    <img
+                      src={
+                        ((odd.status === "live" && odd.home_live_pitcher?.headshot) 
+                          ? odd.home_live_pitcher.headshot 
+                          : odd.home_pitcher_headshot) ||
+                        `https://api.dicebear.com/7.x/initials/svg?seed=${odd.home_pitcher || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`
+                      }
+                      alt={(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
+                      className="w-full h-full object-cover scale-110"
+                    />
+                  </div>
+                  <div className="flex flex-col text-right">
+                    <span className="text-2xl font-serif text-ink tracking-tight">
+                      {(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
+                    </span>
+                    <span className="font-mono text-sm text-zinc-500">
+                      {(odd.status === "live" && odd.home_live_pitcher) ? getPitcherLiveStats(odd.home_live_pitcher) : (odd.home_pitcher_record || "No record data")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

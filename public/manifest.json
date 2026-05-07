@@ -1,0 +1,21 @@
+{
+  "name": "Baseline",
+  "short_name": "Baseline",
+  "description": "Pro Sports Market Intelligence",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF9F6",
+  "theme_color": "#FAF9F6",
+  "icons": [
+    {
+      "src": "https://api.dicebear.com/7.x/identicon/png?seed=Baseline&backgroundColor=2D4A3E&size=192",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://api.dicebear.com/7.x/identicon/png?seed=Baseline&backgroundColor=2D4A3E&size=512",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}

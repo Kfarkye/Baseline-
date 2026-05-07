@@ -1,0 +1,21 @@
+{
+  "name": "Baseline Sports Intelligence",
+  "short_name": "Baseline",
+  "description": "Real-time sports market data and generative AI insights.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF9F6",
+  "theme_color": "#2D4A3E",
+  "icons": [
+    {
+      "src": "https://api.dicebear.com/7.x/identicon/svg?seed=Baseline&backgroundColor=2D4A3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "https://api.dicebear.com/7.x/identicon/svg?seed=Baseline&backgroundColor=2D4A3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

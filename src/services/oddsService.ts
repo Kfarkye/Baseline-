@@ -17,13 +17,6 @@ export interface Bookmaker {
   markets: Market[];
 }
 
-export interface MarketDataStatus {
-  state: "grounded" | "partial" | "failed";
-  code?: string;
-  message?: string;
-  allowed_output?: string;
-}
-
 export interface SportOdds {
   id: string;
   sport_key: string;
@@ -36,6 +29,9 @@ export interface SportOdds {
   status?: string;
   score?: string;
   situation?: string;
+  inning?: number;
+  inning_half?: "Top" | "Bottom";
+  situation_detail?: any;
   context?: string;
   home_pitcher?: string;
   away_pitcher?: string;
@@ -43,15 +39,18 @@ export interface SportOdds {
   away_pitcher_headshot?: string;
   home_pitcher_record?: string;
   away_pitcher_record?: string;
+  home_live_pitcher?: any;
+  away_live_pitcher?: any;
   venue?: string;
-  result_context?: string;
-  event_id?: string;
-  source_url?: string;
-  fetched_at?: string;
-  market_data_status?: MarketDataStatus;
-  inning?: number | string;
-  inning_half?: string;
-  espn_grounding?: unknown;
+  location?: string;
+  weather?: {
+    display: string;
+    wind?: string | null;
+  } | null;
+  bullpen_rating?: string;
+  trend_story?: string;
+  venue_factor?: string;
+  series_history?: string;
   bookmakers: Bookmaker[];
 }
 
