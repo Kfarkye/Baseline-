@@ -8,6 +8,9 @@ export interface ChatMessage {
 // Model Constants
 const MODEL_PRO = "gemini-3.1-pro-preview";
 const MODEL_FLASH = "gemini-3-flash-preview";
+const MODEL_FLASH_LITE = "gemini-3.1-flash-lite-preview";
+const MODEL_25 = "gemini-2.5-flash-preview-12-2025";
+const MODEL_LATEST = "gemini-flash-latest";
 
 /**
  * Senior Engineer Pattern: Lazy initialization of the GenAI client.
@@ -31,7 +34,13 @@ async function callWithRetry<T>(
   baseDelay = 1000
 ): Promise<T> {
   let lastError: any;
-  const modelsToTry = [MODEL_PRO, MODEL_FLASH];
+  const modelsToTry = [
+    MODEL_PRO, 
+    MODEL_FLASH, 
+    MODEL_25,
+    MODEL_FLASH_LITE, 
+    MODEL_LATEST
+  ];
 
   for (const modelName of modelsToTry) {
     for (let i = 0; i <= maxRetries; i++) {
@@ -40,16 +49,17 @@ async function callWithRetry<T>(
       } catch (error: any) {
         lastError = error;
         const status = error?.status || error?.response?.status;
+        const errMsg = error.message?.toLowerCase() || "";
         
         // 403 Forbidden or 404 Not Found usually means the model isn't available for this key/region
         // We should break the inner loop and try the next model immediately
-        if (status === 403 || status === 404 || error.message?.includes("not found") || error.message?.includes("forbidden")) {
-          console.warn(`Model ${modelName} returned ${status}. Attempting fallback...`);
+        if (status === 403 || status === 404 || errMsg.includes("not found") || errMsg.includes("forbidden") || errMsg.includes("unauthorized")) {
+          console.warn(`Model ${modelName} returned ${status || 'Error'}. Attemping fallback... Details: ${error.message}`);
           break; 
         }
 
         // 429 Too Many Requests - Exponential backoff
-        if (status === 429 || error.message?.includes("quota") || error.message?.includes("exhausted")) {
+        if (status === 429 || errMsg.includes("quota") || errMsg.includes("exhausted")) {
           const delay = baseDelay * Math.pow(2, i);
           console.warn(`Rate limit hit on ${modelName}. Retrying in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
@@ -108,7 +118,7 @@ export async function analyzeBetSlip(imageFile: File, userContext: string) {
   }
 }
 
-export async function getBettingInsights(messageParts: (string | { inlineData: { data: string, mimeType: string } })[], history: ChatMessage[] = [], oddsData?: any, mode?: string | null) {
+export async function getBettingInsights(messageParts: (string | { inlineData: { data: string, mimeType: string } })[], history: ChatMessage[] = [], oddsData?: any, mode?: string | null, userLedger?: any[]) {
   try {
     const simplifiedOdds = Array.isArray(oddsData) ? oddsData.slice(0, 30).map(o => ({
       home: o.home_team,
@@ -128,6 +138,7 @@ export async function getBettingInsights(messageParts: (string | { inlineData: {
         You are powered by Gemini 3.
         
         Current available board: ${JSON.stringify(simplifiedOdds)}
+        User's Current Bets: ${userLedger ? JSON.stringify(userLedger) : 'None provided.'}
         Current Analysis Mode: ${mode || 'auto'}
         
         Protocol:
@@ -198,6 +209,8 @@ export async function getBettingInsights(messageParts: (string | { inlineData: {
 
     return await callWithRetry(async (modelName) => {
       const ai = getAIClient();
+      const tools = mode === 'trends' ? [{ googleSearch: {} }] : undefined;
+      
       const response = await ai.models.generateContent({
         model: modelName,
         contents: contents,
@@ -205,6 +218,7 @@ export async function getBettingInsights(messageParts: (string | { inlineData: {
           systemInstruction: systemInstruction,
           temperature: 0.2,
           topP: 0.9,
+          tools: tools,
         }
       });
       return response.text || "Direct feed interruption. Please re-query.";

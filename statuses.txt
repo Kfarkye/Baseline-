@@ -1,0 +1,45 @@
+406:    fetch("/api/ai-status")
+494:  const liveGames = allGamesSorted.filter((o) => o.status === "live");
+496:    (o) => o.status === "upcoming" || !o.status,
+499:    .filter((o) => o.status === "final")
+516:    if (a.status === "live" && b.status !== "live") return -1;
+517:    if (a.status !== "live" && b.status === "live") return 1;
+534:     if (gameStatusFilter === "live") return game.status === "live";
+535:     if (gameStatusFilter === "ended") return game.status === "final";
+536:     if (gameStatusFilter === "pregame") return game.status === "upcoming" || !game.status;
+1274:                                      {odd.status === "live" && (
+1280:                                            {odd.status === "live" && (
+1283:                                            <span className={cn("text-[10px] font-black uppercase tracking-[0.25em]", odd.status === "live" ? "text-zinc-900" : "text-zinc-400 group-hover:text-zinc-500 transition-colors")}>
+1285:                                              {odd.status === "live"
+1302:                                          {odd.status === "live" &&
+2232:                              odd.status === "live" ? "bg-zinc-50/50 hover:bg-zinc-100/50" : "hover:bg-zinc-50"
+2238:                                  {odd.status === "live" && (
+2242:                                    {odd.status === "live" ? (
+2244:                                    ) : odd.status === "final" ? (
+2260:                                  {odd.status === "live" || odd.status === "final" ? (
+2871:          odd.status === "live" && "ring-1 ring-zinc-900/10 border-zinc-900/10",
+2878:              {odd.status === "live" ? (
+2895:          {odd.weather && odd.status !== "live" && (
+2921:                  {odd.status === "live" &&
+2951:                  {odd.status === "live" &&
+2975:          {odd.status === "live" && odd.situation_detail ? (
+3115:                name={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.name : odd.away_pitcher}
+3116:                headshot={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.headshot : odd.away_pitcher_headshot}
+3117:                record={odd.status === "live" && odd.away_live_pitcher ? getPitcherLiveStats(odd.away_live_pitcher) : odd.away_pitcher_record}
+3122:                name={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.name : odd.home_pitcher}
+3123:                headshot={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.headshot : odd.home_pitcher_headshot}
+3124:                record={odd.status === "live" && odd.home_live_pitcher ? getPitcherLiveStats(odd.home_live_pitcher) : odd.home_pitcher_record}
+3263:              odd.status === "live"
+3268:            {odd.status === "live"
+3270:              : odd.status === "final"
+3342:                {odd.status === "final" ? "Final" : odd.situation || "Pregame"}
+3350:              status={odd.status || "upcoming"}
+3365:              {odd.status === "live" ? "Current Pitching" : "Starting Pitching Matchup"}
+3377:                        ((odd.status === "live" && odd.away_live_pitcher?.headshot) 
+3382:                      alt={(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
+3388:                      {(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
+3391:                      {(odd.status === "live" && odd.away_live_pitcher) ? getPitcherLiveStats(odd.away_live_pitcher) : (odd.away_pitcher_record || "No record data")}
+3404:                        ((odd.status === "live" && odd.home_live_pitcher?.headshot) 
+3409:                      alt={(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
+3415:                      {(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
+3418:                      {(odd.status === "live" && odd.home_live_pitcher) ? getPitcherLiveStats(odd.home_live_pitcher) : (odd.home_pitcher_record || "No record data")}

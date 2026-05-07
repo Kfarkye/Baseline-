@@ -24,6 +24,8 @@ export interface SportOdds {
   commence_time: string;
   home_team: string;
   away_team: string;
+  home_canonical_id?: string;
+  away_canonical_id?: string;
   home_score?: string;
   away_score?: string;
   status?: string;
@@ -46,6 +48,16 @@ export interface SportOdds {
   weather?: {
     display: string;
     wind?: string | null;
+  } | null;
+  weather_vector?: {
+    temp: number;
+    condition: string;
+    windSpeed: number;
+    windDirection: number;
+    relativeAngle: number;
+    description: string;
+    stadiumName: string;
+    elevation: number;
   } | null;
   bullpen_rating?: string;
   trend_story?: string;

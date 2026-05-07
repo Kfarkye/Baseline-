@@ -38,6 +38,7 @@ import {
   LayoutGrid,
   Mic,
   Paperclip,
+  Link2,
 } from "lucide-react";
 import { auth, db } from "./lib/firebase";
 import {
@@ -99,6 +100,7 @@ import {
   Eye,
 } from "lucide-react";
 import { BaseballDiamond } from "./components/BaseballDiamond";
+import { TeamStatsTable } from "./components/TeamStatsTable";
 import GameDetail from "./GameDetail";
 
 SyntaxHighlighter.registerLanguage("python", python);
@@ -302,6 +304,7 @@ const CommandCenterModal = ({
                         <button onClick={() => { navigate("/"); setActiveTab("analysis"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Analysis</button>
                         <button onClick={() => { navigate("/"); setActiveTab("ledger"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Ledger</button>
                         <button onClick={() => { navigate("/"); setActiveTab("market"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Market</button>
+                        <button onClick={() => { navigate("/"); setActiveTab("stats"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Stats</button>
                     </div>
 
                     <div className="flex flex-col gap-6">
@@ -354,7 +357,7 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<
-    "board" | "analysis" | "ledger" | "market"
+    "board" | "analysis" | "ledger" | "market" | "stats"
   >("board");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
@@ -394,6 +397,7 @@ export default function App() {
   const navigate = useNavigate();
 
   const [aiStatus, setAiStatus] = useState<"checking" | "online" | "error">("checking");
+  const [userLedger, setUserLedger] = useState<any[]>([]);
   const [ledgerFile, setLedgerFile] = useState<File | null>(null);
   const [ledgerPreview, setLedgerPreview] = useState<string | null>(null);
   const [isAnalyzingLedger, setIsAnalyzingLedger] = useState(false);
@@ -407,6 +411,22 @@ export default function App() {
       .then(data => setAiStatus(data.configured ? "online" : "error"))
       .catch(() => setAiStatus("error"));
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setUserLedger([]);
+      return;
+    }
+    const q = query(
+      collection(db, "users", user.uid, "ledger"),
+      orderBy("timestamp", "desc")
+    );
+    return onSnapshot(q, (snapshot) => {
+      setUserLedger(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => {
+      console.warn("Ledger sync offline:", err);
+    });
+  }, [user]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -775,17 +795,33 @@ export default function App() {
       return;
     }
 
-    const messageParts: (string | { inlineData: { data: string, mimeType: string } })[] = [];
-    if (inputText.trim()) messageParts.push(inputText.trim());
-    if (attachment) messageParts.push({ inlineData: { data: attachment.data, mimeType: attachment.type } });
-
     const userMessage: ChatMessage = { role: "user", text: inputText.trim() || "[Attachment]" };
+    const savedInputText = inputText.trim();
     setInputText("");
     setAttachment(null);
+    setIsTyping(true);
 
-    // Optimistic UI for chat is handled by Firestore listener
-    // but we add locally for faster feel if needed or just wait for Firestore
     try {
+      let finalInputText = savedInputText;
+      const urlMatches = finalInputText.match(/https?:\/\/[^\s]+/g);
+      if (urlMatches && urlMatches.length > 0) {
+        for (const url of urlMatches) {
+          try {
+            const res = await fetch(`/api/fetch-url?url=${encodeURIComponent(url)}`);
+            const data = await res.json();
+            if (data.text) {
+              finalInputText += `\n\n[Context from ${url}]:\n${data.text}`;
+            }
+          } catch (err) {
+            console.error("Failed to fetch URL context", err);
+          }
+        }
+      }
+
+      const messageParts: (string | { inlineData: { data: string, mimeType: string } })[] = [];
+      if (finalInputText) messageParts.push(finalInputText);
+      if (attachment) messageParts.push({ inlineData: { data: attachment.data, mimeType: attachment.type } });
+
       if (userData) {
         try {
           await updateDoc(doc(db, "users", user.uid), {
@@ -802,12 +838,12 @@ export default function App() {
         timestamp: serverTimestamp(),
       });
 
-      setIsTyping(true);
       const insights = await getBettingInsights(
         messageParts,
         messages,
         odds,
         groundingMode,
+        userLedger
       );
 
       await addDoc(collection(db, "users", user.uid, "chats"), {
@@ -1142,6 +1178,15 @@ export default function App() {
                     Market
                 </button>
                 <button
+                    onClick={() => { navigate("/"); setActiveTab("stats"); }}
+                    className={cn(
+                        "text-xs uppercase tracking-[0.2em] font-bold transition-colors",
+                        activeTab === "stats" ? "text-ink" : "text-zinc-400 hover:text-zinc-600"
+                    )}
+                >
+                    Stats
+                </button>
+                <button
                     onClick={() => setIsSlateOpen(!isSlateOpen)}
                     className={cn(
                         "text-xs uppercase tracking-[0.2em] font-bold transition-colors",
@@ -1225,15 +1270,15 @@ export default function App() {
                                           Hydrating...
                                       </p>
                                     ) : (
-                                      <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">
+                                      <p className="text-[10px] uppercase tracking-widest font-black text-zinc-900/80">
                                         {allGamesSorted.length} games ·{" "}
-                                        {liveGames.length} live
+                                        {liveGames.length} active
                                       </p>
                                     )}
                                     <div className="flex items-center gap-1.5 ml-auto">
                                       <span className={cn(
                                         "w-1.5 h-1.5 rounded-full",
-                                        aiStatus === "online" ? "bg-brand" : aiStatus === "checking" ? "bg-zinc-300 animate-pulse" : "bg-red-500"
+                                        aiStatus === "online" ? "bg-zinc-900" : aiStatus === "checking" ? "bg-zinc-300 animate-pulse" : "bg-zinc-200"
                                       )} />
                                       <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-zinc-400">
                                         AI Processor: {aiStatus}
@@ -1254,18 +1299,18 @@ export default function App() {
                                       className="block w-full bg-white border border-zinc-200/60 p-6 md:p-8 rounded-[1.5rem] text-left hover:border-zinc-300 shadow-[0_2px_12px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all duration-300 group relative overflow-hidden"
                                     >
                                       {odd.status === "live" && (
-                                        <div className="absolute top-0 left-0 w-full h-1 bg-red-500" />
+                                        <div className="absolute top-0 left-0 w-full h-[3px] bg-zinc-900" />
                                       )}
                                       <div className="flex justify-between items-start mb-6">
                                         <div>
                                           <div className="flex items-center gap-2 mb-1.5">
                                             {odd.status === "live" && (
-                                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                                              <span className="w-1.5 h-1.5 rounded-full bg-zinc-900 shrink-0" />
                                             )}
-                                            <span className={cn("text-[10px] font-bold uppercase tracking-[0.2em]", odd.status === "live" ? "text-red-500" : "text-zinc-400 group-hover:text-zinc-500 transition-colors")}>
+                                            <span className={cn("text-[10px] font-black uppercase tracking-[0.25em]", odd.status === "live" ? "text-zinc-900" : "text-zinc-400 group-hover:text-zinc-500 transition-colors")}>
                                               {odd.sport_title}{" "}
                                               {odd.status === "live"
-                                                ? "• LIVE"
+                                                ? `• ${odd.inning_half && odd.inning ? `${odd.inning_half} ${odd.inning}` : "Live"}`
                                                 : ""}
                                             </span>
                                           </div>
@@ -1287,7 +1332,7 @@ export default function App() {
                                               <div className="text-xl font-mono font-bold text-zinc-900 tracking-tighter">
                                                 {odd.score}
                                               </div>
-                                              <div className="text-[10px] text-red-500 font-bold uppercase tracking-widest mt-1">
+                                              <div className="text-[10px] text-zinc-950 font-black uppercase tracking-[0.25em] mt-1.5">
                                                 {odd.situation}
                                               </div>
                                             </div>
@@ -1490,8 +1535,8 @@ export default function App() {
                           </div>
 
                           {/* Input Area */}
-                          <div className="p-2 pb-4 md:p-6 sticky bottom-2 md:bottom-4 z-20 flex justify-center">
-                            <div className="w-full max-w-2xl bg-white shadow-[0_4px_24px_rgba(0,0,0,0.04)] border border-zinc-200 rounded-[2rem] p-1.5 flex flex-col gap-2">
+                          <div className="p-2 pb-[env(safe-area-inset-bottom,0.5rem)] md:p-6 sticky bottom-0 md:bottom-4 z-50 flex justify-center">
+                            <div className="w-full max-w-2xl bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] border border-zinc-200 rounded-[2rem] p-1.5 flex flex-col gap-2 relative">
                               {/* Modes */}
                               <div className="flex gap-1">
                                 {(["live", "stats", "trends"] as const).map(
@@ -1531,8 +1576,7 @@ export default function App() {
                             )}
 
                             {/* Actual Input Container */}
-                            <div className="sticky bottom-0 md:bottom-4 z-50 flex justify-center w-full px-2 md:px-0">
-                                <div className="w-full max-w-2xl bg-white/70 backdrop-blur-[16px] shadow-[0_4px_24px_rgba(0,0,0,0.06)] rounded-[24px] p-4 flex flex-col gap-2">
+                             <div className="w-full flex flex-col gap-2">
                                     {attachment && (
                                         <div className="bg-zinc-100 rounded-lg p-2 flex items-center gap-2 text-xs text-zinc-600">
                                             <span>{attachment.name}</span>
@@ -1541,10 +1585,15 @@ export default function App() {
                                             </button>
                                         </div>
                                     )}
-                                    <div className="flex items-end gap-3">
+                                    <div className="flex items-end gap-3 w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-brand/20 transition-all">
                                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleFileChange} />
-                                        <button className="text-zinc-600 hover:text-zinc-900 p-1 shrink-0" onClick={() => fileInputRef.current?.click()}>
+                                        <button title="Upload file" className="text-zinc-600 hover:text-zinc-900 p-1 shrink-0" onClick={() => fileInputRef.current?.click()}>
                                             <Plus size={20} />
+                                        </button>
+                                        <button title="Add URL Context" className="text-zinc-600 hover:text-zinc-900 p-1 shrink-0" onClick={() => {
+                                            setInputText(prev => prev ? `${prev}\nGround this context: https://` : `Ground this context: https://`);
+                                        }}>
+                                            <Link2 size={20} />
                                         </button>
                                         <textarea
                                             value={inputText}
@@ -1555,8 +1604,8 @@ export default function App() {
                                                     sendMessage();
                                                 }
                                             }}
-                                            className="flex-1 text-sm bg-transparent outline-none p-1 text-zinc-900 resize-none min-h-[24px] max-h-32"
-                                            placeholder="Ask for anything..."
+                                            className="flex-1 text-sm bg-transparent outline-none p-1 text-zinc-900 resize-none min-h-[24px] max-h-32 placeholder-zinc-400"
+                                            placeholder="Ask for anything or paste a link..."
                                             rows={1}
                                             style={{ height: 'auto' }}
                                             onInput={(e: any) => {
@@ -1578,7 +1627,6 @@ export default function App() {
                                 </div>
                             </div>
                         </div>
-                    </div>
                 </motion.div>
               )}
 
@@ -1588,9 +1636,9 @@ export default function App() {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
-                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar"
+                          className="h-full px-4 py-6 md:px-10 md:py-10 lg:px-12 lg:py-12 overflow-y-auto custom-scrollbar"
                         >
-                          <div className="max-w-6xl mx-auto space-y-8 md:space-y-16">
+                          <div className="max-w-6xl mx-auto space-y-8">
                             <div className="flex flex-col border-b border-zinc-100 md:pb-10 md:gap-6">
                               {/* DESKTOP HEADER (>768px) */}
                               <div className="hidden md:flex flex-row items-end justify-between gap-6 pb-4 md:pb-0">
@@ -1791,7 +1839,7 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12 mt-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 lg:gap-7 mt-2">
                             {fullSlate?.map((odd) => (
                               <OddsCard
                                 key={odd.id}
@@ -1965,6 +2013,23 @@ export default function App() {
                         </motion.div>
                       )}
 
+                      {activeTab === "stats" && (
+                        <motion.div
+                          key="stats"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar"
+                        >
+                            <div className="max-w-5xl mx-auto">
+                                <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-12">
+                                  Team Statistics
+                                </h2>
+                                <TeamStatsTable />
+                            </div>
+                        </motion.div>
+                      )}
+
                       {activeTab === "market" && (
                         <motion.div
                           key="market"
@@ -2077,7 +2142,8 @@ export default function App() {
                                             {new Date(odd.commence_time).toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric' })}
                                           </span>
                                           <span className="font-mono text-[10px] text-brand border border-brand/20 bg-brand/5 px-2 py-1 rounded font-bold uppercase tracking-widest">
-                                            {new Date(odd.commence_time).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' })} PT
+                                            {(odd.status === 'final' || odd.status === 'finished' || odd.status === 'completed') ? "FINAL" : 
+                                               new Date(odd.commence_time).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' }) + " PT"}
                                           </span>
                                         </div>
                                         
@@ -2213,18 +2279,18 @@ export default function App() {
                             to={`/game/${odd.id}`}
                             className={cn(
                               "block w-full flex flex-col px-6 xl:px-8 py-5 border-b border-zinc-200/40 transition-colors duration-200 group text-left",
-                              odd.status === "live" ? "bg-red-500/[0.02] hover:bg-red-500/[0.04]" : "hover:bg-zinc-50"
+                              odd.status === "live" ? "bg-zinc-50/50 hover:bg-zinc-100/50" : "hover:bg-zinc-50"
                             )}
                           >
                             <div className="w-full flex items-center justify-between">
                               <div>
                                 <div className="flex items-center gap-2 mb-2">
                                   {odd.status === "live" && (
-                                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-900" />
                                   )}
-                                  <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-400 group-hover:text-zinc-600 transition-colors">
+                                  <span className="text-[9px] uppercase tracking-widest font-black text-zinc-400 group-hover:text-zinc-900 transition-colors">
                                     {odd.status === "live" ? (
-                                      <span className="text-red-500">LIVE{odd.situation ? ` • ${odd.situation}` : ""}</span>
+                                      <span className="text-zinc-900">{odd.inning_half && odd.inning ? `${odd.inning_half} ${odd.inning}` : "Live"}{odd.situation ? ` • ${odd.situation}` : ""}</span>
                                     ) : odd.status === "final" ? (
                                       "FINAL"
                                     ) : (
@@ -2852,7 +2918,7 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
         whileHover={{ y: -4, transition: { duration: 0.3, ease: "easeOut" } }}
         className={cn(
           "bg-white border rounded-[2rem] overflow-hidden flex flex-col group transition-all duration-300 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] cursor-pointer h-full border-zinc-200/60",
-          odd.status === "live" && "ring-1 ring-red-500/20 border-red-500/20",
+          odd.status === "live" && "ring-1 ring-zinc-900/10 border-zinc-900/10",
         )}
       >
         {/* Atmosphere Header */}
@@ -2860,13 +2926,13 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-zinc-200/50 shadow-sm">
               {odd.status === "live" ? (
-                 <span className="text-red-500 flex items-center gap-1.5 font-mono">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  LIVE
+                 <span className="text-zinc-900 flex items-center gap-1.5 font-black uppercase tracking-widest">
+                  {odd.inning_half && odd.inning ? `${odd.inning_half} ${odd.inning}` : "Live"}
                 </span>
               ) : (
                 <span className="text-zinc-600 font-mono">
-                  {new Date(odd.commence_time).toLocaleTimeString([], {
+                  {(odd.status === 'final' || odd.status === 'finished') ? "FINAL" : 
+                    new Date(odd.commence_time).toLocaleTimeString([], {
                     hour: "numeric",
                     minute: "2-digit",
                   })}
@@ -2878,48 +2944,44 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
             </div>
           </div>
           {odd.weather && odd.status !== "live" && (
-            <div className="hidden md:flex items-center gap-4 bg-zinc-100/80 px-4 py-1.5 rounded-full border border-zinc-200/60">
-              <div className="flex items-center gap-2 text-zinc-600">
-                <span>{odd.weather.display}</span>
-              </div>
+            <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-md bg-zinc-50 border border-zinc-100 text-zinc-500">
+              <span className="text-[10px] font-medium">{odd.weather.display}</span>
               {odd.weather.wind && (
-                <div className="flex items-center gap-2 border-l border-zinc-200 pl-3 text-zinc-500">
-                  <span>{odd.weather.wind}</span>
-                </div>
+                <span className="text-[10px] font-mono border-l border-zinc-200 pl-2 text-zinc-400">{odd.weather.wind}</span>
               )}
             </div>
           )}
         </div>
 
         {/* Core Matchup */}
-        <div className="p-8 xl:p-10 space-y-10 flex-1 bg-white">
+        <div className="p-5 md:p-7 space-y-6 flex-1 bg-white">
           <div className="relative">
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[60%] font-serif-italic text-sm text-zinc-300 pointer-events-none select-none z-10 flex flex-col items-center justify-center">
               at
             </div>
-            <div className="grid grid-cols-2 gap-16">
+            <div className="grid grid-cols-2 gap-8 md:gap-10">
               {/* Away Team */}
-              <div className="flex flex-col items-center text-center space-y-6">
+              <div className="flex flex-col items-center text-center space-y-4">
                 <div className="relative group/logo">
-                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-125 blur-xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
+                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-110 blur-lg opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
                   <img
                     src={getLogo(odd.away_team)}
-                    className="relative w-24 h-24 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-3.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                    className="relative w-16 h-16 md:w-20 md:h-20 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-2.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
                     alt={odd.away_team}
                   />
                   {odd.status === "live" &&
                     parseInt(odd.away_score || "0") >
                       parseInt(odd.home_score || "0") && (
-                      <div className="absolute top-0 right-0 w-4 h-4 bg-zinc-900 rounded-full border-[3px] border-white shadow-sm z-10" />
+                      <div className="absolute top-0 right-0 w-3 h-3 bg-zinc-900 rounded-full border-[2px] border-white shadow-sm z-10" />
                     )}
                 </div>
                 <div>
-                  <h3 className="text-2xl serif font-medium text-zinc-900 tracking-tight mb-2">
+                  <h3 className="text-xl md:text-2xl serif font-medium text-zinc-900 tracking-tight mb-1.5">
                     {odd.away_team.split(" ").pop()}
                   </h3>
-                  <div className="flex flex-col items-center gap-2">
+                  <div className="flex flex-col items-center gap-1.5">
                     {odd.away_score && (
-                      <span className="text-3xl font-bold text-zinc-900 tracking-tighter block font-mono">
+                      <span className="text-2xl font-bold text-zinc-900 tracking-tighter block font-mono">
                         {odd.away_score}
                       </span>
                     )}
@@ -2929,27 +2991,27 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
               </div>
 
               {/* Home Team */}
-              <div className="flex flex-col items-center text-center space-y-6">
+              <div className="flex flex-col items-center text-center space-y-4">
                 <div className="relative group/logo">
-                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-125 blur-xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
+                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-110 blur-lg opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
                   <img
                     src={getLogo(odd.home_team)}
-                    className="relative w-24 h-24 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-3.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                    className="relative w-16 h-16 md:w-20 md:h-20 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-2.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
                     alt={odd.home_team}
                   />
                   {odd.status === "live" &&
                     parseInt(odd.home_score || "0") >
                       parseInt(odd.away_score || "0") && (
-                      <div className="absolute top-0 right-0 w-4 h-4 bg-zinc-900 rounded-full border-[3px] border-white shadow-sm z-10" />
+                      <div className="absolute top-0 right-0 w-3 h-3 bg-zinc-900 rounded-full border-[2px] border-white shadow-sm z-10" />
                     )}
                 </div>
                 <div>
-                  <h3 className="text-2xl serif font-medium text-zinc-900 tracking-tight mb-2">
+                  <h3 className="text-xl md:text-2xl serif font-medium text-zinc-900 tracking-tight mb-1.5">
                     {odd.home_team.split(" ").pop()}
                   </h3>
-                  <div className="flex flex-col items-center gap-2">
+                  <div className="flex flex-col items-center gap-1.5">
                     {odd.home_score && (
-                      <span className="text-3xl font-bold text-zinc-900 tracking-tighter block font-mono">
+                      <span className="text-2xl font-bold text-zinc-900 tracking-tighter block font-mono">
                         {odd.home_score}
                       </span>
                     )}
@@ -2960,78 +3022,115 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
             </div>
           </div>
 
-          {/* Matchup Narrative Context */}
-          {odd.status !== "live" && (
-            <div className="bg-zinc-50 rounded-[1.25rem] p-6 border border-zinc-200/50 flex flex-col gap-4">
-               <div className="flex items-center justify-between font-mono">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-widest">Environment Analysis</span>
+          {/* Matchup Visual / Context */}
+          {odd.status === "live" && odd.situation_detail ? (
+            <div className="flex items-center justify-between px-6 py-5 bg-white rounded-[1.5rem] border border-zinc-100 shadow-[0_2px_12px_rgba(0,0,0,0.01)] overflow-hidden relative">
+                {/* Background Accent */}
+                <div className="absolute inset-0 bg-gradient-to-br from-white via-zinc-50/30 to-zinc-100/20 pointer-events-none" />
+                
+                <div className="flex flex-col gap-4 relative z-10">
+                  <div className="flex items-center gap-6">
+                    <span className="w-6 text-[8px] font-black text-zinc-300 font-mono tracking-[0.25em] uppercase italic">Ball</span>
+                    <div className="flex gap-2">
+                       {[1,2,3,4].map(b => (
+                        <div key={b} className={cn(
+                          "w-2 h-2 rounded-sm transition-all duration-700 transform rotate-45 border",
+                          b <= odd.situation_detail!.balls 
+                            ? "bg-zinc-900 border-zinc-950 shadow-[0_2px_4px_rgba(0,0,0,0.2)]" 
+                            : "bg-zinc-50/50 border-zinc-200/60"
+                        )} />
+                      ))}
+                    </div>
                   </div>
+                  <div className="flex items-center gap-6">
+                    <span className="w-6 text-[8px] font-black text-zinc-300 font-mono tracking-[0.25em] uppercase italic">Strk</span>
+                    <div className="flex gap-2">
+                       {[1,2,3].map(s => (
+                        <div key={s} className={cn(
+                          "w-2 h-2 rounded-sm transition-all duration-700 transform rotate-45 border",
+                          s <= odd.situation_detail!.strikes 
+                            ? "bg-zinc-900 border-zinc-950 shadow-[0_2px_4px_rgba(0,0,0,0.2)]" 
+                            : "bg-zinc-50/50 border-zinc-200/60"
+                        )} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <span className="w-6 text-[8px] font-black text-zinc-400 font-mono tracking-[0.25em] uppercase italic">Outs</span>
+                    <div className="flex gap-2">
+                       {[1,2,3].map(o => (
+                        <div key={o} className={cn(
+                          "w-2 h-2 rounded-sm transition-all duration-700 transform rotate-45 border",
+                          o <= odd.situation_detail!.outs 
+                            ? "bg-zinc-900 border-zinc-950 shadow-[0_2px_4px_rgba(0,0,0,0.2)]" 
+                            : "bg-zinc-50/50 border-zinc-200/60"
+                        )} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="relative w-24 h-24 transform rotate-45 origin-center bg-white border border-zinc-200/60 rounded shadow-[inset_0_2px_6px_rgba(0,0,0,0.03)] overflow-hidden">
+                  <div className="absolute inset-3 border-[0.5px] border-zinc-100 rounded-sm" />
+                  
+                  {/* Field Lines */}
+                  <div className="absolute top-1/2 left-1/2 w-[160%] h-[0.5px] bg-zinc-100 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
+                  <div className="absolute top-1/2 left-1/2 h-[160%] w-[0.5px] bg-zinc-100 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
+                  
+                  {/* Bases */}
+                  <div className="absolute bottom-[-5px] left-[-5px] w-5 h-5 bg-white rounded-sm border-[0.5px] border-zinc-200 shadow-sm transform rotate-45 z-10" />
+                  
+                  <div className={cn(
+                    "absolute bottom-[-4px] right-[-4px] w-5 h-5 transition-all duration-[900ms] border rounded-sm transform",
+                    odd.situation_detail.onFirst 
+                      ? "bg-zinc-900 border-zinc-950 shadow-lg scale-110 z-20" 
+                      : "bg-white border-zinc-100 shadow-sm"
+                  )} />
+                  
+                  <div className={cn(
+                    "absolute top-[-4px] right-[-4px] w-5 h-5 transition-all duration-[900ms] border rounded-sm transform",
+                    odd.situation_detail.onSecond 
+                      ? "bg-zinc-900 border-zinc-950 shadow-lg scale-110 z-20" 
+                      : "bg-white border-zinc-100 shadow-sm"
+                  )} />
+                  
+                  <div className={cn(
+                    "absolute top-[-4px] left-[-4px] w-5 h-5 transition-all duration-[900ms] border rounded-sm transform",
+                    odd.situation_detail.onThird 
+                      ? "bg-zinc-900 border-zinc-950 shadow-lg scale-110 z-20" 
+                      : "bg-white border-zinc-100 shadow-sm"
+                  )} />
+
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white border border-zinc-100 flex items-center justify-center z-0">
+                     <div className="w-4 h-[0.5px] bg-zinc-200 rotate-[-45deg]" />
+                  </div>
+                </div>
+            </div>
+          ) : (
+            <div className="bg-zinc-50 rounded-[1.25rem] p-4 border border-zinc-200/50">
+               <div className="text-[9px] uppercase font-bold text-zinc-400 tracking-widest mb-2">
+                  Park / Weather
                </div>
-               <p className="text-sm text-zinc-600 leading-relaxed font-serif">
-                  Playing at <span className="text-zinc-900 font-medium">{odd.location}</span>. {odd.venue_factor}. 
-                  {odd.weather ? ` ${odd.weather.display}${odd.weather.wind ? ` with ${odd.weather.wind}` : ''}.` : ''}
+               <p className="text-sm text-zinc-600 leading-relaxed font-serif line-clamp-2">
+                  {odd.weather_vector ? (
+                      <span className="text-zinc-900 font-medium">{odd.weather_vector.stadiumName} · {odd.weather_vector.temp}°F · {odd.weather_vector.description}</span>
+                   ) : (
+                      <>Playing at <span className="text-zinc-900 font-medium">{odd.location}</span>. {odd.venue_factor}{' '}
+                      {odd.weather ? ` ${odd.weather.display}${odd.weather.wind ? ` with ${odd.weather.wind}` : ''}.` : ''}</>
+                   )}
                 </p>
             </div>
           )}
 
           {/* Institutional Data Row */}
-          <div className={cn(
-            "grid gap-3 bg-zinc-50/50 p-2 rounded-3xl border border-zinc-200/40",
-            (odd.status === "live" && odd.situation_detail) ? "grid-cols-1" : (totalPoint !== "-" ? "grid-cols-3" : "grid-cols-2")
-          )}>
-            {odd.status === "live" && odd.situation_detail ? (
-              <div className="flex items-center justify-between px-6 py-4 bg-white rounded-[1.25rem] border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">B</span>
-                    <div className="flex gap-1">
-                      {[1,2,3,4].map(b => <span key={b} className={cn("w-2 h-2 rounded-full transition-colors border", b <= odd.situation_detail!.balls ? "bg-[#2D4A3E] border-[#2D4A3E]" : "bg-white border-zinc-200")} />)}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">S</span>
-                    <div className="flex gap-1">
-                      {[1,2,3].map(s => <span key={s} className={cn("w-2 h-2 rounded-full transition-colors border", s <= odd.situation_detail!.strikes ? "bg-red-500 border-red-500" : "bg-white border-zinc-200")} />)}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">O</span>
-                    <div className="flex gap-1">
-                      {[1,2,3].map(o => <span key={o} className={cn("w-2 h-2 rounded-full transition-colors border", o <= odd.situation_detail!.outs ? "bg-red-500 border-red-500" : "bg-white border-zinc-200")} />)}
-                    </div>
-                  </div>
-                </div>
+          {!odd.situation_detail && (
+            <div className={cn(
+              "grid gap-3 bg-zinc-50/50 p-2 rounded-3xl border border-zinc-200/40",
+              totalPoint !== "-" ? "grid-cols-3" : "grid-cols-2"
+            )}>
+                  {totalPoint !== "-" && (
+                    <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
 
-                <div className="relative w-20 h-20 transform rotate-45 origin-center bg-zinc-50/50 rounded shadow-inner overflow-hidden border border-zinc-200">
-                  <div className="absolute inset-2 border-[2px] border-zinc-200/60 rounded-sm" />
-                  
-                  {/* Field Lines */}
-                  <div className="absolute top-1/2 left-1/2 w-[140%] h-px bg-zinc-200 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
-                  <div className="absolute top-1/2 left-1/2 h-[140%] w-px bg-zinc-200 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
-                  
-                  {/* Home */}
-                  <div className="absolute bottom-[-4px] left-[-4px] w-4 h-4 bg-white rounded-sm border-[2px] border-zinc-300 shadow-md transform rotate-45 z-10" />
-                  
-                  {/* First Base */}
-                  <div className={cn("absolute bottom-[-3px] right-[-3px] w-4 h-4 transition-all duration-500 border-[2px] rounded-sm", odd.situation_detail.onFirst ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_10px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
-                  
-                  {/* Second Base */}
-                  <div className={cn("absolute top-[-3px] right-[-3px] w-4 h-4 transition-all duration-500 border-[2px] rounded-sm", odd.situation_detail.onSecond ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_10px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
-                  
-                  {/* Third Base */}
-                  <div className={cn("absolute top-[-3px] left-[-3px] w-4 h-4 transition-all duration-500 border-[2px] rounded-sm", odd.situation_detail.onThird ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_10px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
-
-                  {/* Pitcher Mound */}
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center z-10 shadow-inner">
-                    <div className="w-3 h-[2px] bg-white border border-zinc-200 rotate-[-45deg] rounded-sm shadow-sm" />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <>
-                {totalPoint !== "-" && (
-                  <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
                     <span className="block text-[9px] uppercase font-bold text-zinc-400 tracking-[0.2em] mb-2">
                       Totals
                     </span>
@@ -3059,9 +3158,8 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
                     {odd.bullpen_rating}
                   </div>
                 </div>
-              </>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Pitching Narrative */}
           <div className="pt-2">
@@ -3224,7 +3322,7 @@ function GameDetailView({ odds, oddsSource }: { odds: SportOdds[], oddsSource?: 
           >
             {odd.status === "live"
               ? "LIVE"
-              : odd.status === "final"
+              : (odd.status === "final" || odd.status === "finished")
                 ? "FINAL"
                 : "UPCOMING"}
           </span>

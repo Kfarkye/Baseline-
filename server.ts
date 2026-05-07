@@ -18,11 +18,28 @@ import crypto from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
+import { getCanonicalTeam, getTeamByEspnId, getTeamByKalshiTicker } from "./src/services/mappingService.ts";
+import { getStadiumWeather } from "./src/services/weatherService.ts";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Simple Memory Cache for Weather Vectors
+const weatherCache = new Map<string, { data: any, timestamp: number }>();
+const WEATHER_TTL = 10 * 60 * 1000; // 10 minutes
+
+// Cache for ESPN Core API Odds
+const espnCoreOddsCache = new Map<string, { data: any, timestamp: number, status: string }>();
+
+// Cache for ESPN Summary
+const espnSummaryCache = new Map<string, { data: any, timestamp: number }>();
+const SUMMARY_TTL = 30000; // 30 seconds
+
+// Cache for Kalshi
+let kalshiCache: { data: any[], timestamp: number } = { data: [], timestamp: 0 };
+const KALSHI_TTL = 45000; // 45 seconds
 
 const modelName = "gemini-1.5-pro";
 
@@ -78,9 +95,6 @@ async function startServer() {
     }
   });
 
-  // Cache for ESPN Core API Odds
-  const espnCoreOddsCache = new Map<string, { data: any, timestamp: number, status: string }>();
-
   // Helper to fetch live odds
   const getLiveOdds = async (sport = 'upcoming', regions = 'us', markets = 'h2h') => {
     const kalshiKeyId = process.env.KALSHI_API_KEY_ID;
@@ -88,39 +102,47 @@ async function startServer() {
     let kalshiMarkets: any[] = [];
     
     if (kalshiKeyId && kalshiPrivateKey) {
-      if (!kalshiPrivateKey.includes('\n')) {
-          let internal = kalshiPrivateKey.replace('-----BEGIN RSA PRIVATE KEY-----', '').replace('-----END RSA PRIVATE KEY-----', '');
-          internal = internal.replace(/ /g, '\n');
-          kalshiPrivateKey = '-----BEGIN RSA PRIVATE KEY-----\n' + internal.trim() + '\n-----END RSA PRIVATE KEY-----';
-      }
+      const now = Date.now();
+      if (now - kalshiCache.timestamp < KALSHI_TTL) {
+        kalshiMarkets = kalshiCache.data;
+      } else {
+        if (!kalshiPrivateKey.includes('\n')) {
+            let internal = kalshiPrivateKey.replace('-----BEGIN RSA PRIVATE KEY-----', '').replace('-----END RSA PRIVATE KEY-----', '');
+            internal = internal.replace(/ /g, '\n');
+            kalshiPrivateKey = '-----BEGIN RSA PRIVATE KEY-----\n' + internal.trim() + '\n-----END RSA PRIVATE KEY-----';
+        }
 
-      try {
-        const method = 'GET';
-        const path = '/trade-api/v2/markets?series_ticker=KXMLBGAME&limit=100&status=open';
-        const timestamp = Date.now().toString();
-        const msg = timestamp + method + path;
+        try {
+          const method = 'GET';
+          const path = '/trade-api/v2/markets?series_ticker=KXMLBGAME&limit=100&status=open';
+          const timestamp = Date.now().toString();
+          const msg = timestamp + method + path;
 
-        const sign = crypto.createSign('RSA-SHA256');
-        sign.update(msg);
-        sign.end();
-        
-        const signature = sign.sign({
-          key: kalshiPrivateKey,
-          padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-          saltLength: 32
-        }, 'base64');
+          const sign = crypto.createSign('RSA-SHA256');
+          sign.update(msg);
+          sign.end();
+          
+          const signature = sign.sign({
+            key: kalshiPrivateKey,
+            padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+            saltLength: 32
+          }, 'base64');
 
-        const res = await axios.get('https://api.elections.kalshi.com' + path + '&_=' + Date.now(), {
-          headers: {
-            'KALSHI-ACCESS-KEY': kalshiKeyId,
-            'KALSHI-ACCESS-SIGNATURE': signature,
-            'KALSHI-ACCESS-TIMESTAMP': timestamp,
-          }
-        });
+          const res = await axios.get('https://api.elections.kalshi.com' + path + '&_=' + Date.now(), {
+            headers: {
+              'KALSHI-ACCESS-KEY': kalshiKeyId,
+              'KALSHI-ACCESS-SIGNATURE': signature,
+              'KALSHI-ACCESS-TIMESTAMP': timestamp,
+            },
+            timeout: 5000
+          });
 
-        kalshiMarkets = res.data.markets || [];
-      } catch (e: any) {
-        console.error("Kalshi fetch error:", e.message);
+          kalshiMarkets = res.data.markets || [];
+          kalshiCache = { data: kalshiMarkets, timestamp: Date.now() };
+        } catch (e: any) {
+          console.error("Kalshi fetch error:", e.message);
+          kalshiMarkets = kalshiCache.data; // use stale on error
+        }
       }
     }
 
@@ -135,8 +157,8 @@ async function startServer() {
         ];
         
         const responses = await Promise.allSettled([
-          ...dates.map(date => axios.get(`https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=${date}&_=${Date.now()}`)),
-          axios.get(`https://statsapi.mlb.com/api/v1/teams?sportId=1&hydrate=teamStats(group=[pitching])&_=${Date.now()}`)
+          ...dates.map(date => axios.get(`https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=${date}&_=${Date.now()}`, { timeout: 5000 })),
+          axios.get(`https://statsapi.mlb.com/api/v1/teams?sportId=1&hydrate=teamStats(group=[pitching])&_=${Date.now()}`, { timeout: 5000 })
         ]);
         
         let mlbStatsMap: Record<string, any> = {};
@@ -163,10 +185,33 @@ async function startServer() {
           const comp = event.competitions[0];
           const homeTeamObj = comp.competitors.find((c: any) => c.homeAway === "home");
           const awayTeamObj = comp.competitors.find((c: any) => c.homeAway === "away");
-          const homeTeam = homeTeamObj?.team.displayName || "Unknown";
-          const awayTeam = awayTeamObj?.team.displayName || "Unknown";
-          const homeAbbr = homeTeamObj?.team.abbreviation;
-          const awayAbbr = awayTeamObj?.team.abbreviation;
+          
+          // Technical Normalization: Canonical ID Resolution
+          const homeCanonical = getTeamByEspnId(String(homeTeamObj?.team?.id));
+          const awayCanonical = getTeamByEspnId(String(awayTeamObj?.team?.id));
+          
+          // Stadium Weather Analysis
+          let weatherVector = null;
+          if (homeCanonical) {
+            const cacheKey = homeCanonical.id;
+            const cached = weatherCache.get(cacheKey);
+            if (cached && (Date.now() - cached.timestamp < WEATHER_TTL)) {
+              weatherVector = cached.data;
+            } else {
+              // Async background fetch to prevent blocking the first request
+              // Subsequent requests will get the cached value
+              getStadiumWeather(homeCanonical.abbreviation).then(vector => {
+                if (vector) weatherCache.set(cacheKey, { data: vector, timestamp: Date.now() });
+              });
+              // If it's a first hit, we might not have it yet, which is fine for the 24hr MVP latency
+            }
+            if (cached) weatherVector = cached.data;
+          }
+
+          const homeTeam = homeCanonical?.fullName || homeTeamObj?.team.displayName || "Unknown";
+          const awayTeam = awayCanonical?.fullName || awayTeamObj?.team.displayName || "Unknown";
+          const homeAbbr = homeCanonical?.abbreviation || homeTeamObj?.team.abbreviation;
+          const awayAbbr = awayCanonical?.abbreviation || awayTeamObj?.team.abbreviation;
           
           const state = event.status.type.state;
           let status = "upcoming";
@@ -185,7 +230,17 @@ async function startServer() {
 
           if (status === "live") {
               try {
-                  const sumRes = await axios.get(`https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${event.id}`);
+                  const summaryCacheKey = `summary-${event.id}`;
+                  const cachedSummary = espnSummaryCache.get(summaryCacheKey);
+                  let sumRes;
+
+                  if (cachedSummary && (Date.now() - cachedSummary.timestamp < SUMMARY_TTL)) {
+                    sumRes = { data: cachedSummary.data };
+                  } else {
+                    sumRes = await axios.get(`https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${event.id}`, { timeout: 4000 });
+                    espnSummaryCache.set(summaryCacheKey, { data: sumRes.data, timestamp: Date.now() });
+                  }
+
                   const homeTeamId = homeTeamObj?.team?.id;
                   const awayTeamId = awayTeamObj?.team?.id;
                   
@@ -458,27 +513,15 @@ async function startServer() {
             let kalshiMatchedMarket = null;
             let matchedTeam = null;
             
-            const isMatch = (mlbTeam: string, kTeam: string) => {
-               if (!kTeam) return false;
-               if (mlbTeam.startsWith(kTeam)) return true;
-               if (kTeam.replace(' D', ' Dodgers') === mlbTeam) return true;
-               if (kTeam === 'Tampa Bay' && mlbTeam === 'Tampa Bay Rays') return true;
-               if (kTeam === 'Kansas City' && mlbTeam === 'Kansas City Royals') return true;
-               if (kTeam === 'Chicago C' && mlbTeam === 'Chicago Cubs') return true;
-               if (kTeam === 'Chicago W' && mlbTeam === 'Chicago White Sox') return true;
-               if (kTeam === 'New York M' && mlbTeam === 'New York Mets') return true;
-               if (kTeam === 'New York Y' && mlbTeam === 'New York Yankees') return true;
-               return mlbTeam.includes(kTeam);
-            };
-            
+            // O(1) Performance Join via Canonical Tickers
             for (const km of kalshiMarkets) {
-               const kalshiTeam = km.yes_sub_title;
-               if (!kalshiTeam || typeof kalshiTeam !== 'string') continue;
+               const kalshiTicker = km.yes_sub_title;
+               const teamFromKalshi = getTeamByKalshiTicker(kalshiTicker);
                
-               if (isMatch(homeTeam, kalshiTeam)) {
+               if (teamFromKalshi && homeCanonical && teamFromKalshi.id === homeCanonical.id) {
                  kalshiMatchedMarket = km; matchedTeam = homeTeam; break;
                }
-               if (isMatch(awayTeam, kalshiTeam)) {
+               if (teamFromKalshi && awayCanonical && teamFromKalshi.id === awayCanonical.id) {
                  kalshiMatchedMarket = km; matchedTeam = awayTeam; break;
                }
             }
@@ -511,6 +554,8 @@ async function startServer() {
           const fetchedAt = new Date().toISOString();
           return {
             id: event.id,
+            home_canonical_id: homeCanonical?.id,
+            away_canonical_id: awayCanonical?.id,
             sport_key: "baseball_mlb",
             sport_title: "MLB",
             commence_time: event.date,
@@ -551,9 +596,10 @@ async function startServer() {
             away_pitcher_record: awayProbableRecord,
             home_live_pitcher: homeLivePitcher,
             away_live_pitcher: awayLivePitcher,
-            venue: venue,
-            location: location,
-            weather: weather,
+            // venue: venue, <-- removed
+            // location: location, <-- removed
+            // weather: weather, <-- removed
+            weather_vector: weatherVector,
             bullpen_rating: bullpenRating,
             trend_story: trendStory,
             venue_factor: venueFactor,
@@ -583,7 +629,47 @@ async function startServer() {
     }
   });
 
-  // 3. SSE Stream for Live Odds
+  // 3. Single Game Detail (Vector Enriched)
+  app.get("/api/game-detail/:id", async (req, res) => {
+    try {
+      const gameId = req.params.id;
+      const allGames = await getLiveOdds('upcoming', 'us', 'h2h');
+      const game = allGames.find(g => g.id === gameId);
+      
+      if (!game) return res.status(404).json({ error: "Game not found" });
+      
+      const sumRes = await axios.get(`https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${gameId}`);
+      
+      res.json({
+        ...game,
+        espn_summary: sumRes.data
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 3a. URL content fetching
+  app.get("/api/fetch-url", async (req, res) => {
+    try {
+      const url = req.query.url as string;
+      if (!url) return res.status(400).json({ error: "Missing url parameter" });
+      const response = await axios.get(url, {
+          headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+      });
+      const cheerio = await import('cheerio');
+      const $ = cheerio.load(response.data);
+      $('script, style, nav, footer, header').remove();
+      const text = $('body').text().replace(/\s+/g, ' ').trim();
+      res.json({ text: text.substring(0, 15000) }); // limit to avoid massive context
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // 4. SSE Stream for Live Odds
   app.get("/api/stream/odds", async (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");

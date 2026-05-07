@@ -39,36 +39,34 @@ export function BaseballDiamond({
   }
 
   return (
-    <div className="w-full flex-col md:flex-row flex items-center justify-between gap-8 md:gap-16 border border-zinc-200/60 bg-white rounded-[2rem] p-8 md:p-12 shadow-[0_4px_24px_rgba(0,0,0,0.02)]">
+    <div className="w-full flex-col md:flex-row flex items-center justify-between gap-10 md:gap-16 border border-zinc-200/50 bg-white rounded-[2.5rem] p-8 md:p-14 shadow-[0_8px_32px_rgba(0,0,0,0.02)]">
        
        <div className="flex-1 flex flex-col justify-center min-w-0 w-full">
-          <div className="mb-8 flex items-center justify-between">
-             <div className="flex items-center gap-3">
-                 <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-50 text-red-600 border border-red-100">
-                    <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-sm" />
-                    <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest leading-none">Live</span>
-                 </span>
+          <div className="mb-10 flex items-center justify-between">
+             <div className="flex items-center gap-4">
                  {(inning && inningHalf) && (
-                    <span className="text-xs font-bold text-zinc-500 uppercase tracking-[0.2em]">{inningHalf} {inning}</span>
+                    <span className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-zinc-900 shadow-xl shadow-zinc-900/10">
+                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-white leading-none">{inningHalf} {inning}</span>
+                    </span>
                  )}
              </div>
           </div>
 
-          <div className="flex flex-col gap-8 w-full">
-            <div className="flex items-center justify-between w-full">
-               <div className="text-3xl sm:text-4xl font-serif text-ink tracking-tight truncate flex-1 pr-4">{awayTeam}</div>
-               <div className="text-5xl sm:text-6xl font-mono font-black text-ink tabular-nums">{awayScore || "0"}</div>
+          <div className="flex flex-col gap-10 w-full">
+            <div className="flex items-baseline justify-between w-full">
+               <div className="text-4xl md:text-5xl font-serif text-zinc-900 tracking-tighter truncate flex-1 pr-6">{awayTeam}</div>
+               <div className="text-6xl md:text-7xl font-mono font-black text-zinc-900 tabular-nums tracking-tighter">{awayScore || "0"}</div>
             </div>
-            <div className="w-full h-px bg-zinc-100" />
-            <div className="flex items-center justify-between w-full">
-               <div className="text-3xl sm:text-4xl font-serif text-ink tracking-tight truncate flex-1 pr-4">{homeTeam}</div>
-               <div className="text-5xl sm:text-6xl font-mono font-black text-ink tabular-nums">{homeScore || "0"}</div>
+            <div className="w-full h-[0.5px] bg-zinc-100" />
+            <div className="flex items-baseline justify-between w-full">
+               <div className="text-4xl md:text-5xl font-serif text-zinc-900 tracking-tighter truncate flex-1 pr-6">{homeTeam}</div>
+               <div className="text-6xl md:text-7xl font-mono font-black text-zinc-900 tabular-nums tracking-tighter">{homeScore || "0"}</div>
             </div>
           </div>
           
           {sd.lastPlay && (
-            <div className="mt-8 bg-zinc-50 border border-zinc-100 rounded-2xl p-5 text-sm text-zinc-600 font-serif leading-relaxed">
-              <span className="font-bold font-sans text-zinc-400 mr-3 uppercase tracking-[0.2em] text-[10px]">Play</span>
+            <div className="mt-12 bg-zinc-50/50 border border-zinc-100/50 rounded-3xl p-6 text-[13px] text-zinc-400 font-serif leading-relaxed italic">
+              <span className="font-black font-sans text-zinc-200 mr-4 uppercase tracking-[0.3em] text-[9px] not-italic">Event Log</span>
               {sd.lastPlay}
             </div>
           )}
@@ -77,45 +75,41 @@ export function BaseballDiamond({
        {/* Right Side - Diamond */}
        <div className="flex flex-col justify-center items-center relative shrink-0">
            
-           <div className="flex items-center gap-6 mb-8 px-6 py-3 bg-zinc-50 rounded-full border border-zinc-100 shadow-sm">
+           <div className="flex items-center gap-8 mb-12 px-8 py-4 bg-white/50 rounded-full border border-zinc-100/80 shadow-sm backdrop-blur-md">
               <div className="flex flex-col items-center gap-2">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">Balls</span>
-                <div className="flex gap-1.5">{[1,2,3,4].map(b => <span key={b} className={cn("w-2.5 h-2.5 rounded-full transition-colors border", b <= sd.balls ? "bg-[#2D4A3E] border-[#2D4A3E]" : "bg-white border-zinc-200")} />)}</div>
+                <span className="text-[8px] font-black uppercase tracking-[0.25em] text-zinc-300">Balls</span>
+                <div className="flex gap-2">{[1,2,3,4].map(b => <span key={b} className={cn("w-2 h-2 rounded-sm rotate-45 transition-all duration-700 border", b <= sd.balls ? "bg-zinc-900 border-zinc-900 scale-110 shadow-lg" : "bg-zinc-50 border-zinc-200")} />)}</div>
               </div>
-              <div className="w-px h-8 bg-zinc-200" />
+              <div className="w-[0.5px] h-8 bg-zinc-100" />
               <div className="flex flex-col items-center gap-2">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">Strikes</span>
-                <div className="flex gap-1.5">{[1,2,3].map(s => <span key={s} className={cn("w-2.5 h-2.5 rounded-full transition-colors border", s <= sd.strikes ? "bg-red-500 border-red-500" : "bg-white border-zinc-200")} />)}</div>
+                <span className="text-[8px] font-black uppercase tracking-[0.25em] text-zinc-300">Strks</span>
+                <div className="flex gap-2">{[1,2,3].map(s => <span key={s} className={cn("w-2 h-2 rounded-sm rotate-45 transition-all duration-700 border", s <= sd.strikes ? "bg-zinc-900 border-zinc-900 scale-110 shadow-lg" : "bg-zinc-50 border-zinc-200")} />)}</div>
               </div>
-              <div className="w-px h-8 bg-zinc-200" />
+              <div className="w-[0.5px] h-8 bg-zinc-100" />
               <div className="flex flex-col items-center gap-2">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">Outs</span>
-                <div className="flex gap-1.5">{[1,2,3].map(o => <span key={o} className={cn("w-2.5 h-2.5 rounded-full transition-colors border", o <= sd.outs ? "bg-red-500 border-red-500" : "bg-white border-zinc-200")} />)}</div>
+                <span className="text-[8px] font-black uppercase tracking-[0.25em] text-zinc-400">Outs</span>
+                <div className="flex gap-2">{[1,2,3].map(o => <span key={o} className={cn("w-2 h-2 rounded-sm rotate-45 transition-all duration-700 border", o <= sd.outs ? "bg-zinc-900 border-zinc-900 scale-110 shadow-lg" : "bg-zinc-50 border-zinc-200")} />)}</div>
               </div>
            </div>
 
-           <div className="relative w-56 h-56 sm:w-72 sm:h-72 transform rotate-45 perspective-1000 origin-center bg-zinc-50/50 rounded-lg shadow-inner overflow-hidden border border-zinc-200">
-              <div className="absolute inset-4 border-[3px] border-zinc-200/60 rounded-sm" />
+           <div className="relative w-64 h-64 sm:w-80 sm:h-80 transform rotate-45 perspective-1000 origin-center bg-zinc-50/30 rounded-xl shadow-[inset_0_4px_12px_rgba(0,0,0,0.02)] overflow-hidden border border-zinc-200/60">
+              <div className="absolute inset-6 border border-zinc-200/30 rounded-sm" />
               
-              {/* Field Lines */}
-              <div className="absolute top-1/2 left-1/2 w-[140%] h-px bg-zinc-200 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
-              <div className="absolute top-1/2 left-1/2 h-[140%] w-px bg-zinc-200 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
+              {/* Technical Precision Lines */}
+              <div className="absolute top-1/2 left-1/2 w-[160%] h-[0.5px] bg-zinc-100 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
+              <div className="absolute top-1/2 left-1/2 h-[160%] w-[0.5px] bg-zinc-100 -translate-y-1/2 -translate-x-1/2 rotate-45 pointer-events-none" />
               
-              {/* Home */}
-              <div className="absolute bottom-[-10px] left-[-10px] w-8 h-8 bg-white rounded-sm border-[3px] border-zinc-300 shadow-md transform rotate-45 z-10" />
+              {/* Home Plate */}
+              <div className="absolute bottom-[-12px] left-[-12px] w-10 h-10 bg-white rounded-sm border border-zinc-200 shadow-sm transform rotate-45 z-10" />
               
-              {/* First Base */}
-              <div className={cn("absolute bottom-[-8px] right-[-8px] w-10 h-10 transition-all duration-500 border-[3px] rounded-sm", sd.onFirst ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_20px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
-              
-              {/* Second Base */}
-              <div className={cn("absolute top-[-8px] right-[-8px] w-10 h-10 transition-all duration-500 border-[3px] rounded-sm", sd.onSecond ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_20px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
-              
-              {/* Third Base */}
-              <div className={cn("absolute top-[-8px] left-[-8px] w-10 h-10 transition-all duration-500 border-[3px] rounded-sm", sd.onThird ? "bg-[#2D4A3E] border-[#1E3027] shadow-[0_0_20px_rgba(45,74,62,0.4)] scale-110 z-20" : "bg-white border-zinc-300 shadow-sm")} />
+              {/* Bases - The Ink Pass */}
+              <div className={cn("absolute bottom-[-10px] right-[-10px] w-12 h-12 transition-all duration-[800ms] border rounded-sm", sd.onFirst ? "bg-zinc-900 border-zinc-950 shadow-2xl scale-[1.08] z-20" : "bg-white border-zinc-200 shadow-sm")} />
+              <div className={cn("absolute top-[-10px] right-[-10px] w-12 h-12 transition-all duration-[800ms] border rounded-sm", sd.onSecond ? "bg-zinc-900 border-zinc-950 shadow-2xl scale-[1.08] z-20" : "bg-white border-zinc-200 shadow-sm")} />
+              <div className={cn("absolute top-[-10px] left-[-10px] w-12 h-12 transition-all duration-[800ms] border rounded-sm", sd.onThird ? "bg-zinc-900 border-zinc-950 shadow-2xl scale-[1.08] z-20" : "bg-white border-zinc-200 shadow-sm")} />
 
               {/* Pitcher Mound */}
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-zinc-100 border-2 border-zinc-200 flex items-center justify-center z-10 shadow-inner">
-                 <div className="w-8 h-2 bg-white border border-zinc-200 rotate-[-45deg] rounded-sm shadow-sm" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 rounded-full bg-zinc-50 border border-zinc-100 flex items-center justify-center z-10 shadow-inner">
+                 <div className="w-10 h-[1px] bg-zinc-200 rotate-[-45deg]" />
               </div>
            </div>
        </div>
