@@ -35,7 +35,7 @@ const espnCoreOddsCache = new Map<string, { data: any, timestamp: number, status
 
 // Cache for ESPN Summary
 const espnSummaryCache = new Map<string, { data: any, timestamp: number }>();
-const SUMMARY_TTL = 30000; // 30 seconds
+const SUMMARY_TTL = 2500; // 2.5 seconds
 
 // Cache for Kalshi
 let kalshiCache: { data: any[], timestamp: number } = { data: [], timestamp: 0 };
@@ -47,7 +47,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   console.log("Checking API Keys...");
   console.log("GEMINI_API_KEY:", process.env.GEMINI_API_KEY ? "Present" : "Missing");
@@ -63,6 +64,15 @@ async function startServer() {
 
 
   // API Routes
+  const errorLogs: string[] = [];
+  app.post("/api/log-error", (req, res) => {
+    console.log("BROWSER ERROR:", req.body.error);
+    errorLogs.push(req.body.error);
+    res.json({ ok: true });
+  });
+  app.get("/api/get-errors", (req, res) => {
+    res.json({ errors: errorLogs });
+  });
   
   // 0. AI Status Check (Env only)
   app.get("/api/ai-status", (req, res) => {
@@ -70,6 +80,111 @@ async function startServer() {
       status: "ok", 
       configured: !!process.env.GEMINI_API_KEY 
     });
+  });
+
+  // AI Proxies
+  app.post("/api/gemini/analyze", async (req, res) => {
+    try {
+      const { base64Data, mimeType, userContext } = req.body;
+      const { GoogleGenAI } = await import("@google/genai");
+      
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error("SERVER_MISCONFIG: GEMINI_API_KEY missing");
+      const client = new GoogleGenAI({ apiKey });
+      
+      const prompt = `Perform institutional extraction on this ledger. Map entities, odds, wagers, and detect asymmetric value. Respond in clean Markdown highlighting extracted data. Context: ${userContext}`;
+      
+      const response = await client.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { data: base64Data, mimeType: mimeType } },
+            { text: prompt }
+          ]
+        }]
+      });
+      res.json({ text: response.text || "Analysis processed, empty payload returned." });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || String(e) });
+    }
+  });
+
+  app.post("/api/gemini/insights", async (req, res) => {
+    try {
+      const { contents, dynamicContext, mode } = req.body;
+      const { GoogleGenAI } = await import("@google/genai");
+      
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error("SERVER_MISCONFIG: GEMINI_API_KEY missing");
+      const client = new GoogleGenAI({ apiKey });
+      
+      // We embed the system directives inside
+      const systemInstruction = `
+You are Baseline, an elite Principal UI Engineer (L8) and Institutional Quant.
+Your strict directive is to generate breathtaking, production-ready React components utilizing Tailwind CSS.
+
+CRITICAL RULES:
+1. ONLY output a valid \`\`\`tsx code block. No markdown text outside the block.
+2. Build COMPREHENSIVE dashboards. Do not output tiny, simple widgets. Build multi-grid layouts, data tables, metric cards, and charts in a single view.
+3. NEVER use inline styles. Use Tailwind CSS exclusively.
+
+=== STRICT DESIGN SYSTEM (TAILWIND) ===
+- Layout: NEVER cram text together. Use \`flex flex-col gap-6\` or \`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8\` heavily. Always pad containers generously (\`p-6 md:p-8\`).
+- Surfaces: Primary cards use \`bg-white border border-zinc-200/60 rounded-[2rem] shadow-[0_8px_32px_rgba(0,0,0,0.04)]\`. Deep data layers use \`bg-zinc-50/80 rounded-2xl border border-zinc-100 p-5\`.
+- Typography: 
+  - Main text: \`font-sans text-zinc-900\`
+  - Elite Headers: \`font-serif tracking-tight text-3xl md:text-4xl\`
+  - Data / Odds: \`font-mono tabular-nums tracking-tighter text-3xl font-light\` (MANDATORY for numbers).
+  - Micro-labels: \`text-[10px] uppercase tracking-widest font-black text-zinc-400 mb-1 block\`
+- Accents: Use \`text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase\` for +EV/positive metrics.
+- Icons: Heavily integrate \`lucide-react\` icons (e.g., \`<TrendingUp className="text-emerald-500 w-5 h-5" />\`) to establish visual hierarchy.
+
+Think like a Vercel or Stripe designer. Build high-density, beautifully padded, highly structured quantitative dashboards.
+
+CONTEXT:
+${dynamicContext}
+      `.trim();
+      
+      const response = await client.models.generateContent({ // We use flash latest for robustness if pro fails, or just pro preview
+        model: 'gemini-3.1-pro-preview',
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.5,
+          topP: 0.95,
+          tools: mode === 'trends' ? [{ googleSearch: {} } as any] : undefined,
+        }
+      });
+      res.json({ text: response.text || "Feed interrupted." });
+    } catch (e: any) {
+      // Provide fallback using flash if 3.1-pro-preview is unsupported
+      if (e?.status === 400 || e?.message?.includes('not found') || e?.message?.includes('model') || e?.message?.includes('API key')) {
+        try {
+          const { contents, dynamicContext, mode } = req.body;
+          const { GoogleGenAI } = await import("@google/genai");
+          const apiKey = process.env.GEMINI_API_KEY;
+          const client = new GoogleGenAI({ apiKey });
+          const response = await client.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents,
+          });
+          return res.json({ text: response.text || "Feed interrupted." });
+        } catch (fallbackError: any) {
+            let errorMsg = fallbackError?.message || String(fallbackError);
+            if (errorMsg.includes("API key not valid")) {
+                errorMsg = "Your Gemini API Key is invalid. Please check the AI Studio settings and paste a valid key.";
+            }
+            res.status(500).json({ error: errorMsg });
+            return;
+        }
+      }
+      let errorMsg = e.message || String(e);
+      if (errorMsg.includes("API key not valid")) {
+          errorMsg = "Your Gemini API Key is invalid. Please check the AI Studio settings and paste a valid key.";
+      }
+      res.status(500).json({ error: errorMsg });
+    }
   });
 
   // 1. Stripe Checkout / Payment Intent
@@ -156,18 +271,25 @@ async function startServer() {
           new Date(Date.now() + 172800000).toISOString().split('T')[0].replace(/-/g, '') // Day After
         ];
         
+        const todayDateStr = new Date().toISOString().split('T')[0];
         const responses = await Promise.allSettled([
           ...dates.map(date => axios.get(`https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=${date}&_=${Date.now()}`, { timeout: 5000 })),
-          axios.get(`https://statsapi.mlb.com/api/v1/teams?sportId=1&hydrate=teamStats(group=[pitching])&_=${Date.now()}`, { timeout: 5000 })
+          axios.get(`https://statsapi.mlb.com/api/v1/teams/stats?sportId=1&stats=season&group=pitching&season=${new Date().getFullYear()}`, { timeout: 5000 }),
+          axios.get(`https://statsapi.mlb.com/api/v1/schedule/games/?sportId=1&date=${todayDateStr}`, { timeout: 5000 })
         ]);
-        
+
+        let mlbScheduleGames: any[] = [];
+        const scheduleRes = responses.pop() as any;
+        if (scheduleRes && scheduleRes.status === 'fulfilled' && scheduleRes.value?.data?.dates?.[0]?.games) {
+           mlbScheduleGames = scheduleRes.value.data.dates[0].games;
+        }
+
         let mlbStatsMap: Record<string, any> = {};
         const mlbRes = responses.pop() as any;
-        if (mlbRes && mlbRes.status === 'fulfilled' && mlbRes.value?.data?.teams) {
-          mlbRes.value.data.teams.forEach((t: any) => {
-            const era = t.teamStats?.find((ts: any) => ts.group?.displayName?.toLowerCase() === 'pitching')?.splits?.[0]?.stat?.era;
-            if (t.abbreviation && era) {
-               mlbStatsMap[t.abbreviation] = parseFloat(era);
+        if (mlbRes && mlbRes.status === 'fulfilled' && mlbRes.value?.data?.stats?.[0]?.splits) {
+          mlbRes.value.data.stats[0].splits.forEach((split: any) => {
+            if (split.team?.name && split.stat) {
+               mlbStatsMap[split.team.name] = split.stat;
             }
           });
         }
@@ -240,6 +362,32 @@ async function startServer() {
                     sumRes = await axios.get(`https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${event.id}`, { timeout: 4000 });
                     espnSummaryCache.set(summaryCacheKey, { data: sumRes.data, timestamp: Date.now() });
                   }
+                  
+                  // Match MLB Game
+                  let mlbLivePlayData: any = undefined;
+                  const espnHomeSub = (homeTeamObj?.team?.location || "").toLowerCase().split(" ")[0];
+                  const mlbGame = mlbScheduleGames.find(g => {
+                     const mlbHome = (g.teams?.home?.team?.name || "").toLowerCase();
+                     return mlbHome.includes(espnHomeSub);
+                  });
+                  
+                  if (mlbGame && mlbGame.gamePk) {
+                     const mlbLiveCacheKey = `mlb-live-${mlbGame.gamePk}`;
+                     const cachedMlb = espnSummaryCache.get(mlbLiveCacheKey);
+                     if (cachedMlb && (Date.now() - cachedMlb.timestamp < SUMMARY_TTL)) {
+                         mlbLivePlayData = cachedMlb.data;
+                     } else {
+                         try {
+                             const mlbLiveRes = await axios.get(`https://statsapi.mlb.com/api/v1.1/game/${mlbGame.gamePk}/feed/live`, { timeout: 4000 });
+                             const plays = mlbLiveRes.data?.liveData?.plays?.currentPlay;
+                             if (plays) {
+                                 mlbLivePlayData = plays;
+                                 espnSummaryCache.set(mlbLiveCacheKey, { data: plays, timestamp: Date.now() });
+                             }
+                         } catch (err) {}
+                     }
+                  }
+                  event._mlbLivePlayData = mlbLivePlayData;
 
                   const homeTeamId = homeTeamObj?.team?.id;
                   const awayTeamId = awayTeamObj?.team?.id;
@@ -302,15 +450,47 @@ async function startServer() {
           const awayRecord = awayTeamObj?.records?.find((r: any) => r.type === "total")?.summary || "";
           
           let bullpenRating = "UNKNOWN";
-          const homeERA = mlbStatsMap[homeAbbr] || 4.0;
-          const awayERA = mlbStatsMap[awayAbbr] || 4.0;
+          const homeTeamDisplayName = homeTeamObj?.team?.displayName;
+          const awayTeamDisplayName = awayTeamObj?.team?.displayName;
           
-          if (homeERA < 3.5 || awayERA < 3.5) {
+          const homeStat = mlbStatsMap[homeTeamDisplayName] || {};
+          const awayStat = mlbStatsMap[awayTeamDisplayName] || {};
+
+          const homeERA = parseFloat(homeStat.era) || 4.0;
+          const awayERA = parseFloat(awayStat.era) || 4.0;
+          
+          const homeSaves = parseInt(homeStat.saves) || 0;
+          const homeBlown = parseInt(homeStat.blownSaves) || 0;
+          const awaySaves = parseInt(awayStat.saves) || 0;
+          const awayBlown = parseInt(awayStat.blownSaves) || 0;
+
+          const homeSavePct = homeSaves + homeBlown > 0 ? homeSaves / (homeSaves + homeBlown) : 0.6;
+          const awaySavePct = awaySaves + awayBlown > 0 ? awaySaves / (awaySaves + awayBlown) : 0.6;
+
+          const avgSavePct = (homeSavePct + awaySavePct) / 2;
+          const avgEra = (homeERA + awayERA) / 2;
+          
+          if (avgSavePct >= 0.70 && avgEra < 3.7) {
             bullpenRating = "ELITE";
-          } else if (homeERA > 4.5 || awayERA > 4.5) {
+          } else if (avgSavePct < 0.55 || avgEra > 4.5) {
             bullpenRating = "STUNTED";
           } else {
             bullpenRating = "RELIABLE";
+          }
+
+          let tvBroadcast = "MLB.TV";
+          if (comp.broadcasts && comp.broadcasts.length > 0) {
+            const national = comp.broadcasts.find((b: any) => b.market === 'national');
+            if (national && national.names && national.names.length > 0) {
+              tvBroadcast = national.names.join(", ");
+            } else if (comp.broadcasts[0].names && comp.broadcasts[0].names.length > 0) {
+              tvBroadcast = comp.broadcasts[0].names.join(", ");
+            }
+          }
+
+          let ticketsSummary = "N/A";
+          if (comp.tickets && comp.tickets.length > 0 && comp.tickets[0].summary) {
+             ticketsSummary = comp.tickets[0].summary;
           }
 
           let seriesHistory = `Matchup: ${awayAbbr} vs ${homeAbbr}`;
@@ -339,7 +519,7 @@ async function startServer() {
           const cached = espnCoreOddsCache.get(cacheKey);
           
           if (cached) {
-            const ttl = cached.status === 'final' ? Infinity : (cached.status === 'live' ? 15000 : 60000);
+            const ttl = cached.status === 'final' ? Infinity : (cached.status === 'live' ? 2500 : 60000);
             if (now - cached.timestamp < ttl) {
                coreOdds = cached.data;
             }
@@ -413,6 +593,17 @@ async function startServer() {
                    }
                }
 
+               if (!hasH2H && provider.moneyline) {
+                   const homeMLStr = provider.moneyline.home?.close?.odds || provider.moneyline.home?.open?.odds;
+                   const awayMLStr = provider.moneyline.away?.close?.odds || provider.moneyline.away?.open?.odds;
+                   
+                   if (homeMLStr && awayMLStr) {
+                     homeML = parseInt(homeMLStr, 10);
+                     awayML = parseInt(awayMLStr, 10);
+                     hasH2H = true;
+                   }
+               }
+
                if (hasH2H) {
                  markets.push({
                    key: "h2h",
@@ -423,19 +614,35 @@ async function startServer() {
                  });
                }
                
-               if (totalsSource?.total?.american || provider.overUnder) {
-                 const point = totalsSource?.total?.alternateDisplayValue ? parseFloat(totalsSource.total.alternateDisplayValue) : provider.overUnder;
-                 const overAmerican = totalsSource?.over?.american ? parseInt(totalsSource.over.american, 10) : -110;
-                 const underAmerican = totalsSource?.under?.american ? parseInt(totalsSource.under.american, 10) : -110;
-                 if (point) {
+               if (totalsSource?.total?.american || provider.overUnder || provider.total) {
+                 const point = totalsSource?.total?.alternateDisplayValue ? parseFloat(totalsSource.total.alternateDisplayValue) : (provider.overUnder || provider.total?.over?.close?.line?.replace('o','') || provider.total?.over?.open?.line?.replace('o',''));
+                 const overAmerican = totalsSource?.over?.american ? parseInt(totalsSource.over.american, 10) : (provider.total?.over?.close?.odds ? parseInt(provider.total.over.close.odds, 10) : -110);
+                 const underAmerican = totalsSource?.under?.american ? parseInt(totalsSource.under.american, 10) : (provider.total?.under?.close?.odds ? parseInt(provider.total.under.close.odds, 10) : -110);
+                 if (point && !isNaN(parseFloat(point as string))) {
                    markets.push({
                      key: "totals",
                      outcomes: [
-                       { name: "Over", price: overAmerican, point },
-                       { name: "Under", price: underAmerican, point }
+                       { name: "Over", price: overAmerican, point: parseFloat(point as string) },
+                       { name: "Under", price: underAmerican, point: parseFloat(point as string) }
                      ]
                    });
                  }
+               }
+               
+               const homeSpreadLine = provider.pointSpread?.home?.close?.line || provider.pointSpread?.home?.open?.line || homeTeamSource?.spread?.alternateDisplayValue || homeTeamSource?.runLine?.alternateDisplayValue;
+               const awaySpreadLine = provider.pointSpread?.away?.close?.line || provider.pointSpread?.away?.open?.line || awayTeamSource?.spread?.alternateDisplayValue || awayTeamSource?.runLine?.alternateDisplayValue;
+                 
+               const homeSpreadOdds = provider.pointSpread?.home?.close?.odds || provider.pointSpread?.home?.open?.odds || homeTeamSource?.spread?.american || homeTeamSource?.runLine?.american;
+               const awaySpreadOdds = provider.pointSpread?.away?.close?.odds || provider.pointSpread?.away?.open?.odds || awayTeamSource?.spread?.american || awayTeamSource?.runLine?.american;
+
+               if (homeSpreadLine && awaySpreadLine) {
+                 markets.push({
+                   key: "spreads",
+                   outcomes: [
+                     { name: homeTeam, price: parseInt(homeSpreadOdds, 10) || -110, point: parseFloat(homeSpreadLine) },
+                     { name: awayTeam, price: parseInt(awaySpreadOdds, 10) || -110, point: parseFloat(awaySpreadLine) }
+                   ]
+                 });
                }
                
                if (markets.length > 0) {
@@ -466,16 +673,24 @@ async function startServer() {
                   const parts = details.split(" ");
                   const favAbbr = parts[0];
                   const lineStr = parts[1];
-                  const line = parseInt(lineStr, 10) || -110;
+                  const point = parseFloat(lineStr) || -1.5;
                   
-                  const homePrice = homeAbbr === favAbbr ? line : -110;
-                  const awayPrice = awayAbbr === favAbbr ? line : -110;
+                  const homePoint = homeAbbr === favAbbr ? point : (point > 0 ? -Math.abs(point) : Math.abs(point));
+                  const awayPoint = awayAbbr === favAbbr ? point : (point > 0 ? -Math.abs(point) : Math.abs(point));
 
+                  markets.push({
+                    key: "spreads",
+                    outcomes: [
+                      { name: homeTeam, price: -110, point: homePoint },
+                      { name: awayTeam, price: -110, point: awayPoint }
+                    ]
+                  });
+                  // Add generic moneyline fallback since details is usually just the spread
                   markets.push({
                     key: "h2h",
                     outcomes: [
-                      { name: homeTeam, price: homePrice },
-                      { name: awayTeam, price: awayPrice }
+                      { name: homeTeam, price: -110 },
+                      { name: awayTeam, price: -110 }
                     ]
                   });
                 }
@@ -585,8 +800,21 @@ async function startServer() {
                  headshot: comp.situation.batter.athlete?.headshot,
                  summary: comp.situation.batter.summary
                } : undefined,
-               lastPlay: comp.situation.lastPlay?.text
+               lastPlay: comp.situation.lastPlay?.text || event._mlbLivePlayData?.result?.description,
+               lastPitch: (() => {
+                  const mlbLive = event._mlbLivePlayData;
+                  if (!mlbLive) return undefined;
+                  const pitch = mlbLive.playEvents?.filter((p: any) => p.isPitch)?.pop();
+                  if (!pitch) return undefined;
+                  return {
+                     speed: pitch.pitchData?.startSpeed,
+                     type: pitch.details?.type?.description || pitch.details?.type?.code,
+                     call: pitch.details?.description
+                  };
+               })()
             } : undefined,
+            home_team_record: homeRecord,
+            away_team_record: awayRecord,
             context: status === "upcoming" ? context : undefined,
             home_pitcher: homeProbable,
             away_pitcher: awayProbable,
@@ -604,6 +832,8 @@ async function startServer() {
             trend_story: trendStory,
             venue_factor: venueFactor,
             series_history: seriesHistory,
+            tv_broadcast: tvBroadcast,
+            tickets_summary: ticketsSummary,
             bookmakers,
             fetched_at: fetchedAt,
             source_url: `https://www.espn.com/mlb/game/_/gameId/${event.id}`
@@ -702,7 +932,7 @@ async function startServer() {
         }
 
         if (hasLive) {
-          nextInterval = 5000; // 5s for live
+          nextInterval = 2500; // 2.5s for live
         } else if (hasUpcoming) {
           nextInterval = 15000; // 15s for pregame
         }

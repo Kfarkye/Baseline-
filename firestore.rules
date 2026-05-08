@@ -99,6 +99,7 @@ service cloud.firestore {
       allow get: if true;
       allow list: if isSignedIn() && resource.data.creatorId == request.auth.uid;
       allow create: if isSignedIn() && isValidArtifact(incoming()) && incoming().createdAt == request.time && incoming().fetchedAt == request.time;
+      allow update: if true && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'fetchedAt']) && incoming().content is string && incoming().content.size() <= 1048576;
     }
   }
 }

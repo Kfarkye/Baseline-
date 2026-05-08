@@ -12,6 +12,22 @@
     <link rel="apple-touch-icon" href="https://api.dicebear.com/7.x/identicon/svg?seed=Baseline&backgroundColor=2D4A3E" />
   </head>
   <body>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        fetch('/api/log-error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: message + ' ' + (error ? error.stack : '') })
+        });
+      };
+      window.onunhandledrejection = function(event) {
+        fetch('/api/log-error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: 'Promise Rejection: ' + event.reason })
+        });
+      };
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

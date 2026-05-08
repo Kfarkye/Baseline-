@@ -20,6 +20,21 @@ export async function getStadiumWeather(teamAbbr: string): Promise<WeatherVector
   const stadium = MLB_STADIUMS[teamAbbr];
   if (!stadium) return null;
 
+  // Toronto is in Canada and outside the NWS API's coverage.
+  // Instead of waiting for a 504 Gateway Timeout, we can return a default Dome response immediately.
+  if (teamAbbr === 'TOR') {
+    return {
+      temp: 72,
+      condition: "Controlled Environment",
+      windSpeed: 0,
+      windDirection: 0,
+      relativeAngle: 0,
+      description: "Controlled Environment (Dome)",
+      stadiumName: stadium.name,
+      elevation: stadium.elevation
+    };
+  }
+
   try {
     // 1. Get NWS Point (Points are cacheable/stable)
     const pointResponse = await fetch(`https://api.weather.gov/points/${stadium.lat},${stadium.lng}`, {
@@ -32,12 +47,14 @@ export async function getStadiumWeather(teamAbbr: string): Promise<WeatherVector
     }
     
     if (!pointResponse.ok) {
-      throw new Error(`NWS API Error: ${pointResponse.statusText}`);
+      console.warn(`NWS API Error (${pointResponse.status}): ${pointResponse.statusText} for ${stadium.name}`);
+      return null;
     }
 
     const pointData = await pointResponse.json();
     if (!pointData.properties || !pointData.properties.forecastHourly) {
-      throw new Error(`NWS API Error: Invalid point data for ${stadium.lat},${stadium.lng}`);
+      console.warn(`NWS API Error: Invalid point data for ${stadium.lat},${stadium.lng}`);
+      return null;
     }
     
     const forecastUrl = pointData.properties.forecastHourly;
@@ -48,12 +65,14 @@ export async function getStadiumWeather(teamAbbr: string): Promise<WeatherVector
     });
     
     if (!forecastResponse.ok) {
-      throw new Error(`NWS Forecast API Error: ${forecastResponse.statusText}`);
+      console.warn(`NWS Forecast API Error (${forecastResponse.status}): ${forecastResponse.statusText}`);
+      return null;
     }
 
     const forecastData = await forecastResponse.json();
     if (!forecastData.properties || !forecastData.properties.periods || forecastData.properties.periods.length === 0) {
-      throw new Error(`NWS Forecast API Error: Invalid forecast data`);
+      console.warn(`NWS Forecast API Error: Invalid forecast data`);
+      return null;
     }
 
     const current = forecastData.properties.periods[0];
@@ -96,7 +115,11 @@ export async function getStadiumWeather(teamAbbr: string): Promise<WeatherVector
       elevation: stadium.elevation
     };
   } catch (error) {
-    console.error(`Weather fetch failed for ${teamAbbr}:`, error);
+    if (error instanceof Error && error.message.includes('fetch')) {
+      console.warn(`Weather data not reachable for ${teamAbbr} (Network or Timeout).`);
+    } else {
+      console.warn(`Weather fetch failed for ${teamAbbr}:`, error);
+    }
     return null;
   }
 }

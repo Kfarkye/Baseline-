@@ -1,233 +1,347 @@
 import { GoogleGenAI } from "@google/genai";
 
+// ============================================================================
+// 1. DOMAIN MODELS & STRICT IMMUTABILITY
+// ============================================================================
+// At the Senior/Staff level, payload boundaries must be strictly Readonly
+// to prevent accidental state mutations across asynchronous boundaries.
+
+export type Role = 'user' | 'model' | 'assistant' | 'system' | (string & {});
+export type ModelTier = 'pro' | 'flash' | 'flash-lite' | 'latest';
+
 export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
+  readonly role: Role;
+  readonly text: string;
 }
 
-// Model Constants
-const MODEL_PRO = "gemini-3.1-pro-preview";
-const MODEL_FLASH = "gemini-3-flash-preview";
-const MODEL_FLASH_LITE = "gemini-3.1-flash-lite-preview";
-const MODEL_25 = "gemini-2.5-flash-preview-12-2025";
-const MODEL_LATEST = "gemini-flash-latest";
+export interface GenAIOptions {
+  readonly signal?: AbortSignal;
+  readonly requestId?: string;
+  readonly userId?: string;
+}
 
-/**
- * Senior Engineer Pattern: Lazy initialization of the GenAI client.
- * Ensures we always pull the freshest key from the environment.
- */
-function getAIClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured in the environment.");
+export interface GameOdds {
+  readonly home_team?: string;
+  readonly away_team?: string;
+  readonly status?: string;
+  readonly score?: string | number;
+  readonly bookmakers?: ReadonlyArray<{
+    readonly markets?: ReadonlyArray<{
+      readonly key: string;
+      readonly outcomes?: ReadonlyArray<{
+        readonly name: string;
+        readonly price: number;
+        readonly point?: number;
+      }>;
+    }>;
+  }>;
+  readonly [key: string]: unknown;
+}
+
+// ============================================================================
+// 2. CONFIGURATION & TELEMETRY REGISTRY
+// ============================================================================
+
+const CONFIG = Object.freeze({
+  MODELS: {
+    // 🎯 Restored: Explicitly routing to the Gemini 3.1 Preview architecture
+    'pro': ["gemini-3.1-pro-preview"],
+    'flash': ["gemini-3-flash-preview", "gemini-flash-latest"],
+    'flash-lite': ["gemini-3.1-flash-lite"],
+    'latest': ["gemini-flash-latest"]
+  } satisfies Record<ModelTier, ReadonlyArray<string>>,
+  
+  RETRY: {
+    MAX_ATTEMPTS: 3,
+    BASE_DELAY_MS: 1000,
+    JITTER_MAX_MS: 500,
   }
-  return new GoogleGenAI({ apiKey });
+});
+
+/**
+ * Enterprise Telemetry Stub.
+ * Wires to Datadog, OpenTelemetry, or GCP Logging in production.
+ */
+const Telemetry = {
+  info: (event: string, meta: Record<string, unknown>) => { /* console.info(`[INF] ${event}`, JSON.stringify(meta)); */ },
+  warn: (event: string, meta: Record<string, unknown>) => console.warn(`[WRN] ${event}`, JSON.stringify(meta)),
+  error: (event: string, error: unknown, meta: Record<string, unknown>) => console.error(`[ERR] ${event}`, JSON.stringify(meta), error)
+};
+
+// ============================================================================
+// 3. STRUCTURED ERROR TOPOLOGY
+// ============================================================================
+
+export class AIExecutionError extends Error {
+  constructor(
+    public readonly code: 'RATE_LIMIT' | 'SAFETY_BLOCK' | 'BAD_REQUEST' | 'TIMEOUT' | 'ABORTED' | 'UNKNOWN',
+    message: string,
+    public readonly cause?: unknown
+  ) {
+    super(message);
+    this.name = 'AIExecutionError';
+    Object.setPrototypeOf(this, AIExecutionError.prototype);
+  }
+}
+
+// ============================================================================
+// 4. THE L7 PRODUCT SYSTEM DIRECTIVES (OUTPUT QUALITY)
+// ============================================================================
+// This forces Gemini 3.1 to output elite, zero-dependency FAANG React code.
+
+const getSystemDirectives = (dynamicContext: string) => `
+You are Baseline, an elite L7/Staff Front-End Engineer and Institutional Sports Quant powered by Gemini 3.1.
+Your strict directive is to generate production-ready, ultra-premium React UI artifacts.
+
+CRITICAL INSTRUCTIONS:
+- You are a pure code-generation engine. DO NOT output conversational text, pleasantries, or explanations.
+- Output EXACTLY ONE markdown code block wrapped in \`\`\`tsx (for React), \`\`\`recharts, or \`\`\`d3.
+- The entire response MUST be the artifact.
+
+=== 1. ARCHITECTURE & REACT PATTERNS ===
+- Components MUST be purely functional and explicitly typed.
+- Enforce strict immutability. Use \`useMemo\` and \`useCallback\` extensively to prevent O(N) re-renders, especially when mapping odds arrays.
+- Handle edge cases, missing data, and loading states seamlessly. NEVER assume the arrays are perfectly populated. Provide graceful skeleton fallbacks.
+- Use \`Intl.NumberFormat\` for all currency, percentages, and numeric displays to guarantee localization standards.
+
+=== 2. VISUAL HIERARCHY & DESIGN TOKENS (TAILWIND) ===
+- Aesthetic: Combine the data-density of a Bloomberg Terminal with the typography and friction-less geometry of Linear/Vercel.
+- Surfaces: Use subtle layer separation. \`bg-white\`, \`bg-zinc-50/50\`, \`bg-zinc-900\`.
+- Borders & Dividers: Hairline precision using \`ring-1 ring-inset ring-zinc-200/50\` or \`border-zinc-200/60\`.
+- Shadows: Multi-layered, diffused optical elevation (e.g., \`shadow-[0_2px_8px_rgba(0,0,0,0.04),0_16px_32px_rgba(0,0,0,0.04)]\`).
+- Typography: \`font-serif\` for elegant editorial headers, \`font-mono tabular-nums tracking-tighter\` for data/odds to prevent layout shifting. Use \`subpixel-antialiased\`.
+- Motion: Wrap state transitions in Framer Motion \`<AnimatePresence>\` and \`<motion.div>\`. Use strict spring physics (\`transition={{ type: "spring", bounce: 0, duration: 0.4 }}\`).
+
+=== 3. ACCESSIBILITY (WAI-ARIA) & INTERACTION ===
+- Zero keyboard traps. Every interactive element MUST have \`aria-label\`, \`aria-expanded\`, or \`aria-controls\` where appropriate.
+- Focus States: \`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2\`.
+- Screen Readers: Heavily utilize \`<span className="sr-only">\` to translate visual data (like charts or odds movements) into semantic spoken text.
+
+=== 4. DATA VISUALIZATION ===
+- If rendering Recharts: DO NOT use default tooltips or axes. Create bespoke \`content\` renderers utilizing glassmorphism (\`backdrop-blur-md bg-white/90 ring-1 ring-zinc-200\`). Hide clunky Cartesian lines (\`<CartesianGrid vertical={false} strokeOpacity={0.05} />\`).
+
+CONTEXT:
+${dynamicContext}
+`.trim();
+
+// ============================================================================
+// 5. INFRASTRUCTURE: SINGLETON & RESILIENCE ENGINE
+// ============================================================================
+
+let aiClientInstance: GoogleGenAI | null = null;
+
+function getAIClient(): GoogleGenAI {
+  if (aiClientInstance) return aiClientInstance;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("SERVER_MISCONFIG: GEMINI_API_KEY environment variable is missing.");
+  return (aiClientInstance = new GoogleGenAI({ apiKey }));
 }
 
 /**
- * Robust retry mechanism with exponential backoff.
- * Specifically handles transient network issues and rate limits.
+ * Executes a GenAI inference request with advanced resilience patterns.
+ * Implements exponential backoff, jitter, model fallback arrays, and AbortSignal cancellation.
  */
-async function callWithRetry<T>(
-  fn: (modelName: string) => Promise<T>,
-  maxRetries = 2,
-  baseDelay = 1000
+async function executeWithResilience<T>(
+  tier: ModelTier,
+  operation: (modelName: string) => Promise<T>,
+  options?: GenAIOptions
 ): Promise<T> {
-  let lastError: any;
-  const modelsToTry = [
-    MODEL_PRO, 
-    MODEL_FLASH, 
-    MODEL_25,
-    MODEL_FLASH_LITE, 
-    MODEL_LATEST
-  ];
+  const reqId = options?.requestId || crypto.randomUUID();
+  const models = CONFIG.MODELS[tier] ?? CONFIG.MODELS['flash'];
+  let lastError: unknown;
+  const startTime = performance.now();
 
-  for (const modelName of modelsToTry) {
-    for (let i = 0; i <= maxRetries; i++) {
+  for (const modelName of models) {
+    for (let attempt = 1; attempt <= CONFIG.RETRY.MAX_ATTEMPTS; attempt++) {
+      options?.signal?.throwIfAborted();
+
       try {
-        return await fn(modelName);
-      } catch (error: any) {
-        lastError = error;
-        const status = error?.status || error?.response?.status;
-        const errMsg = error.message?.toLowerCase() || "";
+        Telemetry.info('ai_request_start', { reqId, modelName, attempt });
         
-        // 403 Forbidden or 404 Not Found usually means the model isn't available for this key/region
-        // We should break the inner loop and try the next model immediately
-        if (status === 403 || status === 404 || errMsg.includes("not found") || errMsg.includes("forbidden") || errMsg.includes("unauthorized")) {
-          console.warn(`Model ${modelName} returned ${status || 'Error'}. Attemping fallback... Details: ${error.message}`);
-          break; 
+        const result = await operation(modelName);
+        
+        const latencyMs = Math.round(performance.now() - startTime);
+        Telemetry.info('ai_request_success', { reqId, modelName, latencyMs });
+        
+        return result;
+      } catch (error: unknown) {
+        lastError = error;
+        
+        if (error instanceof Error && error.name === 'AbortError') {
+          Telemetry.info('ai_request_aborted', { reqId });
+          throw new AIExecutionError('ABORTED', 'Client aborted the request.', error);
         }
 
-        // 429 Too Many Requests - Exponential backoff
-        if (status === 429 || errMsg.includes("quota") || errMsg.includes("exhausted")) {
-          const delay = baseDelay * Math.pow(2, i);
-          console.warn(`Rate limit hit on ${modelName}. Retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+        const isObj = typeof error === 'object' && error !== null;
+        const status = isObj && 'status' in error ? Number((error as any).status) : 
+                       (isObj && 'response' in error ? Number((error as any).response?.status) : null);
+        const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+
+        Telemetry.warn('ai_request_failure', { reqId, attempt, status, modelName });
+
+        // Immediate Failures
+        if (status === 403 || status === 404 || msg.includes("not found")) {
+          throw new AIExecutionError('BAD_REQUEST', 'Authentication or routing failed.', error);
+        }
+        if (status === 400 && msg.includes("max tokens")) {
+          break; // Break loop, slide down to next fallback model in the array
+        }
+        if (msg.includes("safety") || msg.includes("content advisory")) {
+          throw new AIExecutionError('SAFETY_BLOCK', 'Content flagged by core safety systems.', error);
+        }
+
+        // Retryable Failures (Preview endpoints frequently throw 503s or 429s)
+        if (status === 429 || status === 503 || msg.includes("quota") || msg.includes("overloaded")) {
+          if (attempt >= CONFIG.RETRY.MAX_ATTEMPTS) {
+            throw new AIExecutionError('RATE_LIMIT', 'Exhausted retry budget.', error);
+          }
+          const baseDelay = Math.pow(2, attempt) * CONFIG.RETRY.BASE_DELAY_MS;
+          const jitter = Math.random() * CONFIG.RETRY.JITTER_MAX_MS;
+          
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(resolve, baseDelay + jitter);
+            // Wire cancellation directly into the sleep cycle to free thread immediately
+            if (options?.signal) {
+              options.signal.addEventListener('abort', () => {
+                clearTimeout(timeout);
+                reject(new Error('AbortError'));
+              }, { once: true });
+            }
+          });
           continue;
         }
 
-        // If it's a safety error, don't retry, it won't change
-        if (error.message?.includes("SAFETY")) {
-          throw error;
-        }
-
-        // Other errors - retry once then try fallback model
-        if (i < maxRetries) {
-          const delay = baseDelay * (i + 1);
-          await new Promise(resolve => setTimeout(resolve, delay));
+        // Network Jitter
+        if (attempt < CONFIG.RETRY.MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, 1000 + Math.random() * 200));
         }
       }
     }
   }
-  throw lastError;
+
+  Telemetry.error('ai_request_exhausted', lastError, { reqId, duration: performance.now() - startTime });
+  throw new AIExecutionError('UNKNOWN', 'Operation failed after exhaustive model fallbacks.', lastError);
 }
 
-export async function analyzeBetSlip(imageFile: File, userContext: string) {
-  try {
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        resolve(result.split(',')[1]);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(imageFile);
-    });
+// ============================================================================
+// 6. DATA NORMALIZATION (PURE FUNCTIONS)
+// ============================================================================
 
-    const prompt = `Analyze this betting slip or ledger screenshot. Extract the specific details of the bet: team/player, odds, wager amount, and outcome if visible. Also provide actionable feedback based on Baseline's institutional tracking (e.g., "This aligns with sharp movement" or "You are buying at the top of the market"). Respond with clear Markdown highlighting the extracted data and the analysis. User context: ${userContext}`;
+function normalizeHistory(history: ReadonlyArray<ChatMessage>) {
+  const normalized: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
 
-    return await callWithRetry(async (modelName) => {
-      const ai = getAIClient();
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: {
-          parts: [
-            { inlineData: { data: base64Data, mimeType: imageFile.type } },
-            { text: prompt }
-          ]
-        }
-      });
-      return response.text;
-    });
-  } catch (error: any) {
-    console.error("Baseline Vision Error:", error);
-    if (error.message?.includes("SAFETY")) {
-      return "Vision processing rejected. The safety system flagged this content.";
+  for (const msg of history) {
+    const role = (msg.role === 'model' || msg.role === 'assistant') ? 'model' : 'user';
+    const last = normalized[normalized.length - 1];
+
+    if (last && last.role === role) {
+      last.parts[0].text += `\n\n${msg.text}`;
+    } else {
+      normalized.push({ role, parts: [{ text: msg.text }] });
     }
-    return `Vision processing synchronized manually (${error.message || 'Check connection'}). Please try again.`;
+  }
+
+  while (normalized.length > 0 && normalized[0].role !== 'user') normalized.shift();
+
+  return normalized;
+}
+
+// ============================================================================
+// 7. PUBLIC API EXPORTS
+// ============================================================================
+
+export async function analyzeBetSlip(
+  imageFile: File, 
+  userContext: string,
+  options?: GenAIOptions
+): Promise<string> {
+  try {
+    const arrayBuffer = await imageFile.arrayBuffer();
+    let base64Data: string;
+    
+    // Ensure browser compatibility
+    if (typeof window !== 'undefined' && typeof btoa === 'function') {
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      base64Data = btoa(binary);
+    } else {
+      base64Data = Buffer.from(arrayBuffer).toString('base64');
+    }
+
+    const response = await fetch('/api/gemini/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64Data, mimeType: imageFile.type, userContext }),
+      signal: options?.signal
+    });
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || response.statusText);
+    }
+    const data = await response.json();
+    return data.text;
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') throw new AIExecutionError('ABORTED', 'Client aborted');
+    return `Vision synchronization failed. Please re-upload. (${error instanceof Error ? error.message : 'Timeout'})`;
   }
 }
 
-export async function getBettingInsights(messageParts: (string | { inlineData: { data: string, mimeType: string } })[], history: ChatMessage[] = [], oddsData?: any, mode?: string | null, userLedger?: any[]) {
+export async function getBettingInsights(
+  messageParts: ReadonlyArray<string | { inlineData: { data: string; mimeType: string } }>,
+  history: ReadonlyArray<ChatMessage> = [],
+  oddsData?: ReadonlyArray<GameOdds> | null,
+  mode: string = 'auto',
+  userLedger?: ReadonlyArray<Record<string, unknown>>,
+  options?: GenAIOptions
+): Promise<string> {
   try {
-    const simplifiedOdds = Array.isArray(oddsData) ? oddsData.slice(0, 30).map(o => ({
-      home: o.home_team,
-      away: o.away_team,
+    const simplifiedOdds = oddsData?.slice(0, 20).map(o => ({
+      match: `${o.away_team || 'TBA'} @ ${o.home_team || 'TBA'}`,
       status: o.status,
       score: o.score,
-      venue: o.venue,
-      pitchers: `${o.away_pitcher || 'TBA'} @ ${o.home_pitcher || 'TBA'}`,
-      odds: o.bookmakers?.[0]?.markets?.map((m: any) => ({
-        key: m.key,
-        outcomes: m.outcomes?.map((oc: any) => `${oc.name}: ${oc.price}`)
+      markets: o.bookmakers?.[0]?.markets?.map(m => ({
+        k: m.key, 
+        o: m.outcomes?.map(oc => `${oc.name}:${oc.price}${oc.point ? `[${oc.point}]` : ''}`)
       }))
-    })) : oddsData;
+    })) || null;
 
-    const systemInstruction = `
-        You are Baseline, a high-reasoning institutional market data and statistical sports analysis engine. 
-        You are powered by Gemini 3.
-        
-        Current available board: ${JSON.stringify(simplifiedOdds)}
-        User's Current Bets: ${userLedger ? JSON.stringify(userLedger) : 'None provided.'}
-        Current Analysis Mode: ${mode || 'auto'}
-        
-        Protocol:
-        1. EXHAUSTIVE REASONING: Use internal logic to cross-reference market data.
-        2. DATA VISUALIZATION: Use Markdown tables.
-        3. HTML ARTIFACTS: When asked to generate an HTML, dashboard, artifact, or interface, YOU MUST produce a highly advanced, SOTA HTML file.
-           - Embed Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"></script>
-           - For complex UIs, embed React/ReactDOM and Babel via CDN to write React apps inline:
-             <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-             <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-             <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-             <script type="text/babel"> // React code here </script>
-           - Include EXHAUSTIVE Meta Tags for SEO/AEO: Description, Keywords, OpenGraph cards, Twitter Cards, Schema.org JSON-LD for articles/datasets.
-           - For charts, include Chart.js: <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-           - The interface must be visually stunning, using Google Fonts (e.g., Inter, Space Grotesk), responsive CSS grids, hover states, Lucide Icons, and smooth transitions.
-           - It MUST be long, comprehensive, and in-depth. Do not write short toy examples. Build a massive dashboard or detailed report. Full screen, data-rich.
-           - Return the code COMPLETE and SELF-CONTAINED wrapped in \`\`\`html \`\`\`.
-        4. CONCISE REPORTING: Focus on spreads, totals, and pitching matchups.
-        5. LIVE STATE AWARENESS: If the game is currently LIVE (status in progress, e.g. "bottom of the 3rd inning"), you MUST heavily focus your analytical breakdown on LIVE GAME PERFORMANCE. Do not just regurgitate pre-game starting pitcher analysis. Instead, dynamically analyze how both pitchers and teams are performing *IN THIS SPECIFIC GAME RIGHT NOW* up to the current inning, considering the current score, and shift the value indication to reflect live betting edge based on the unfolding game script.
-        6. PITCHING FOCUS: SP matchups (${simplifiedOdds?.[0]?.pitchers || 'Upcoming'}) and bullpen strength.
-      `;
+    const dynamicContext = `
+[BOARD]: ${simplifiedOdds ? JSON.stringify(simplifiedOdds) : 'NO_DATA'}
+[LEDGER]: ${userLedger ? JSON.stringify(userLedger) : 'EMPTY'}
+[MODE]: ${mode}
+    `.trim();
 
-    const contents = [];
-    let currentRole: 'user' | 'model' | null = null;
-    let currentText = "";
+    const contents = normalizeHistory(history) as any[];
+    const structuredParts = messageParts.map(part => 
+      typeof part === 'string' ? { text: part } : { inlineData: part.inlineData }
+    );
 
-    const userHistory = history.map(m => ({
-      role: (m.role === 'model' || (m.role as string) === 'assistant') ? 'model' as const : 'user' as const,
-      text: m.text
-    }));
-
-    for (const m of userHistory) {
-      if (m.role === currentRole) {
-        currentText += "\n" + m.text;
-      } else {
-        if (currentRole) {
-          contents.push({
-            role: currentRole,
-            parts: [{ text: currentText }],
-          });
-        }
-        currentRole = m.role;
-        currentText = m.text;
-      }
-    }
-    
-    if (currentRole) {
-      contents.push({
-        role: currentRole as 'user' | 'model',
-        parts: [{ text: currentText }],
-      });
+    const lastContent = contents[contents.length - 1];
+    if (lastContent?.role === 'user') {
+      lastContent.parts.push(...structuredParts);
+    } else {
+      contents.push({ role: 'user', parts: structuredParts });
     }
 
-    while (contents.length > 0 && contents[0].role !== 'user') {
-      contents.shift();
-    }
-
-    const payloadParts: (string | { inlineData: { data: string, mimeType: string } })[] = messageParts;
-    const structuredParts = payloadParts.map(part => {
-        if (typeof part === 'string') return { text: part };
-        return { inlineData: part.inlineData };
+    const response = await fetch('/api/gemini/insights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents, dynamicContext, mode }),
+      signal: options?.signal
     });
 
-    contents.push({
-      role: 'user',
-      parts: structuredParts as any
-    });
-
-    return await callWithRetry(async (modelName) => {
-      const ai = getAIClient();
-      const tools = mode === 'trends' ? [{ googleSearch: {} }] : undefined;
-      
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: contents,
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0.2,
-          topP: 0.9,
-          tools: tools,
-        }
-      });
-      return response.text || "Direct feed interruption. Please re-query.";
-    });
-  } catch (error: any) {
-    console.error("Baseline Client Error:", error);
-    if (error.message?.includes("SAFETY")) {
-      return "My safety filters blocked this request. Please try rephrasing.";
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || response.statusText);
     }
-    return `The analytical processor is undergoing synchronization (${error.message || 'API rejected connection'}). Please attempt query again.`;
+    const data = await response.json();
+    return data.text;
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') throw new AIExecutionError('ABORTED', 'Client aborted');
+    return `Engine offline. ${error instanceof Error ? error.message : 'Unknown fault'}.`;
   }
 }

@@ -28,6 +28,8 @@ export interface SportOdds {
   away_canonical_id?: string;
   home_score?: string;
   away_score?: string;
+  home_team_record?: string;
+  away_team_record?: string;
   status?: string;
   score?: string;
   situation?: string;
@@ -63,6 +65,8 @@ export interface SportOdds {
   trend_story?: string;
   venue_factor?: string;
   series_history?: string;
+  tv_broadcast?: string;
+  tickets_summary?: string;
   bookmakers: Bookmaker[];
 }
 

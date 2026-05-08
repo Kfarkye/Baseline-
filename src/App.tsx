@@ -1,45 +1,58 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 
-export const getPitcherLiveStats = (pitcher: any) => {
+export const getPitcherLiveStats = (pitcher: any, odd?: any) => {
   if (!pitcher) return "Currently Pitching";
-  const pc = pitcher.pitchCount ? `${pitcher.pitchCount} PC` : "";
-  const era = pitcher.gameEra ? `${pitcher.gameEra} ERA` : "";
+  let activePitcher = pitcher;
+  if (odd) {
+    if (odd.home_live_pitcher?.name === pitcher.name) activePitcher = { ...pitcher, ...odd.home_live_pitcher };
+    else if (odd.away_live_pitcher?.name === pitcher.name) activePitcher = { ...pitcher, ...odd.away_live_pitcher };
+  }
+  const pc = activePitcher.pitchCount ? `${activePitcher.pitchCount} PC` : "";
+  const era = activePitcher.gameEra ? `${activePitcher.gameEra} ERA` : "";
   if (pc || era) {
     return [pc, era].filter(Boolean).join(" · ");
   }
-  return pitcher.summary || "Pitching";
+  return activePitcher.summary || "Pitching";
 };
 import { motion, AnimatePresence } from "motion/react";
-import {
-  MessageSquare,
-  TrendingUp,
-  Calendar,
-  Wallet,
-  Settings,
-  User as UserIcon,
-  Send,
-  ChevronRight,
-  ChevronDown,
-  LogOut,
-  AlertCircle,
-  PlusCircle,
-  Plus,
-  RefreshCw,
-  BarChart,
-  Zap,
-  Check,
-  Wind,
-  Cloud,
-  MapPin,
-  ShieldCheck,
-  Activity,
-  Clock,
-  History,
-  LayoutGrid,
-  Mic,
-  Paperclip,
-  Link2,
-} from "lucide-react";
+const createIcon = (label: string) => ({ className, ...props }: any) => <span className={`text-[10px] uppercase tracking-widest font-bold ${className || ""}`} {...props}>{label}</span>;
+const createDot = () => ({ className, ...props }: any) => <span className={`w-1.5 h-1.5 rounded-full bg-current ${className || ""}`} {...props}></span>;
+
+export const MessageSquare = createIcon("Msg");
+export const TrendingUp = createIcon("Trnd");
+export const Calendar = createIcon("Cal");
+export const Wallet = createIcon("Wlt");
+export const Settings = createIcon("Set");
+export const UserIcon = createDot();
+export const Send = createIcon("Run");
+export const ChevronRight = createIcon("→");
+export const ChevronLeft = createIcon("←");
+export const ChevronDown = createIcon("↓");
+export const LogOut = createIcon("Exit");
+export const AlertCircle = createIcon("!");
+export const PlusCircle = createIcon("+");
+export const Plus = createIcon("+");
+export const RefreshCw = createIcon("Sync");
+export const BarChart = createIcon("Data");
+export const Zap = createDot();
+export const Check = createIcon("✓");
+export const Wind = createIcon("Wnd");
+export const Cloud = createIcon("Cld");
+export const MapPin = createIcon("Loc");
+export const ShieldCheck = createIcon("Sec");
+export const Activity = createIcon("Act");
+export const Clock = createIcon("Time");
+export const History = createIcon("Hist");
+export const LayoutGrid = createIcon("Grid");
+export const Mic = createIcon("Mic");
+export const Paperclip = createIcon("Atch");
+export const Link2 = createIcon("Lnk");
+export const ArrowRight = createIcon("→");
+export const X = createIcon("✕");
+export const Search = createIcon("Src");
+export const Camera = createIcon("Cam");
+export const Loader2 = ({ className, ...props }: any) => <span className={`text-[10px] uppercase tracking-widest font-bold animate-pulse ${className || ""}`} {...props}>...</span>;
+export const Flame = createIcon("Hot");
 import { auth, db } from "./lib/firebase";
 import {
   signInWithPopup,
@@ -81,27 +94,25 @@ import remarkGfm from "remark-gfm";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
-import {
-  Download,
-  Bot,
-  Copy,
-  Code,
-  TerminalSquare,
-  FileText,
-  Globe,
-  Info,
-  UploadCloud,
-  ImageIcon,
-  Loader2,
-  Camera,
-  X,
-  Search,
-  Code2,
-  Eye,
-} from "lucide-react";
+import { ResponsiveContainer, LineChart, Line, BarChart as RechartsBarChart, Bar, ScatterChart, Scatter, AreaChart, Area, PieChart, Pie, Cell, ZAxis, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from "recharts";
+import * as d3 from "d3";
+export const Download = createIcon("DL");
+export const Bot = createDot();
+export const Copy = createIcon("Cp");
+export const Code = createIcon("</>");
+export const TerminalSquare = createIcon(">_");
+export const FileText = createIcon("Doc");
+export const Globe = createIcon("Net");
+import { ArtifactRenderer } from "./components/ArtifactRenderer";
 import { BaseballDiamond } from "./components/BaseballDiamond";
 import { TeamStatsTable } from "./components/TeamStatsTable";
 import GameDetail from "./GameDetail";
+
+export const Info = createIcon("i");
+export const UploadCloud = createIcon("Up");
+export const ImageIcon = createIcon("Img");
+export const Code2 = createIcon("</>");
+export const Eye = createIcon("Vis");
 
 SyntaxHighlighter.registerLanguage("python", python);
 
@@ -180,25 +191,26 @@ export const getEspnLogo = (teamName: string) => {
     : `https://api.dicebear.com/7.x/identicon/svg?seed=${teamName}&backgroundColor=FAF9F6&fontFamily=serif`;
 };
 
-const OddsDisplay = ({ price }: { price: number | string | undefined }) => {
-  if (price === undefined) return null;
+const OddsDisplay = ({ price }: { price: number | string | undefined | null }) => {
+  if (price === undefined || price === null) return null;
+  const pStr = price.toString();
   const displayPrice =
     typeof price === "number"
       ? price > 0
         ? `+${price}`
         : price
-      : price.toString().startsWith("+") || price.toString().startsWith("-")
+      : pStr.startsWith("+") || pStr.startsWith("-")
         ? price
         : `+${price}`;
 
-  const isPositive = typeof price === "number" ? price > 0 : price.toString().startsWith('+');
+  const isPositive = typeof price === "number" ? price > 0 : pStr.startsWith('+');
 
   return (
     <div className={cn(
-      "font-mono font-bold text-[10px] uppercase tracking-tight ring-1 ring-inset px-2.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all",
+      "font-mono font-medium text-[10px] uppercase tracking-wider px-2.5 py-1.5 rounded-full ring-1 ring-inset transition-all",
       isPositive 
-        ? "bg-emerald-50 text-emerald-700 ring-emerald-600/10" 
-        : "bg-white text-zinc-600 ring-zinc-200"
+        ? "bg-[#F0FFF4] text-[#1C7C44] ring-[#1C7C44]/10" 
+        : "bg-[#FFF5F5] text-[#C53030] ring-[#C53030]/10"
     )}>
       {displayPrice}
     </div>
@@ -220,19 +232,23 @@ function PitcherDisplay({
   alignRight?: boolean;
   small?: boolean;
 }) {
-  const teamAbbr =
+  let teamAbbr =
     MLB_TEAM_MAP[teamFull as keyof typeof MLB_TEAM_MAP] ||
-    teamFull.substring(0, 3);
+    (teamFull || "TBA").substring(0, 3);
+  
+  if (teamFull === "Pitching") teamAbbr = "P";
+  if (teamFull === "Batting") teamAbbr = "AB";
+
   const fallbackImg = `https://api.dicebear.com/7.x/initials/svg?seed=${name || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`;
 
   return (
     <div
-      className={cn("flex items-center gap-3", alignRight && "flex-row-reverse text-right")}
+      className={cn("flex items-center gap-2", alignRight && "flex-row-reverse text-right")}
     >
       <div
         className={cn(
-          small ? "w-9 h-9" : "w-12 h-12",
-          "rounded-full overflow-hidden bg-zinc-50 shrink-0 shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-zinc-200/60 transition-transform group-hover:scale-105"
+          small ? "w-8 h-8 md:w-9 md:h-9" : "w-12 h-12",
+          "rounded-full overflow-hidden bg-white shrink-0 shadow-precise border border-zinc-100 transition-transform group-hover:scale-110 duration-500"
         )}
       >
         <img
@@ -241,23 +257,18 @@ function PitcherDisplay({
           alt={name || "TBA"}
         />
       </div>
-      <div className={cn("flex flex-col", alignRight && "items-end")}>
+      <div className={cn("flex flex-col min-w-0 max-w-[80px] md:max-w-none", alignRight && "items-end")}>
         <div
-          className={cn("flex items-center gap-1.5 mb-0.5", alignRight && "flex-row-reverse")}
+          className={cn("flex items-center gap-1 mb-0", alignRight && "flex-row-reverse")}
         >
-          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">
-            {teamAbbr.toUpperCase()}
+          <span className="text-[10px] md:text-[11px] font-bold text-zinc-900 truncate">
+            {name ? name.split(" ").pop() : "TBA"}
+          </span>
+          <span className="text-[7px] md:text-[8px] font-black text-zinc-300 uppercase tracking-tighter">
+            {(teamAbbr || "").toUpperCase()}
           </span>
         </div>
-        <span
-          className={cn(
-            small ? "text-sm" : "text-base",
-            "font-medium text-zinc-900 leading-none mb-1 serif"
-          )}
-        >
-          {name || "TBA"}
-        </span>
-        <span className="text-[10px] md:text-xs font-mono text-zinc-500">
+        <span className="text-[7px] md:text-[8px] font-mono text-zinc-400 font-bold tracking-tight truncate w-full">
           {record || "-"}
         </span>
       </div>
@@ -270,6 +281,7 @@ const CommandCenterModal = ({
     isMenuOpen, 
     setIsMenuOpen, 
     setActiveTab, 
+    activeTab,
     navigate,
     slateFilter,
     setSlateFilter,
@@ -284,27 +296,52 @@ const CommandCenterModal = ({
     <AnimatePresence>
         {isMenuOpen && (
             <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
-                className="fixed inset-0 z-[100] bg-white/80 backdrop-blur-[40px] p-6 flex flex-col xl:hidden overflow-y-auto"
+                initial={{ opacity: 0, y: "100%" }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: "100%" }}
+                transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+                className="fixed inset-x-0 bottom-0 top-12 z-[100] bg-white rounded-t-[2.5rem] shadow-[0_-8px_40px_rgba(0,0,0,0.08)] p-8 flex flex-col xl:hidden"
             >
-                <div className="flex justify-between items-center mb-12">
-                    <div className="text-3xl font-serif italic text-brand">B</div>
-                    <button onClick={() => setIsMenuOpen(false)} className="text-sm font-bold tracking-widest uppercase text-zinc-500 hover:text-ink">
-                        Close
+                <div className="flex justify-center mb-8">
+                    <div className="w-12 h-1.5 bg-zinc-100 rounded-full" />
+                </div>
+                <div className="flex justify-between items-center mb-10">
+                    <div className="flex items-center gap-4">
+                        <div className="text-3xl font-serif italic text-brand">B</div>
+                        <span className="text-[10px] font-black tracking-widest uppercase text-zinc-900 pt-1">Command Center</span>
+                    </div>
+                    <button onClick={() => setIsMenuOpen(false)} className="w-10 h-10 flex items-center justify-center bg-zinc-50 rounded-full text-zinc-400 hover:text-ink transition-colors">
+                        <X size={20} />
                     </button>
                 </div>
                 
-                <nav className="flex flex-col gap-10">
-                    <div className="flex flex-col gap-4">
-                        <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase">Navigation</span>
-                        <button onClick={() => { navigate("/"); setActiveTab("board"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Board</button>
-                        <button onClick={() => { navigate("/"); setActiveTab("analysis"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Analysis</button>
-                        <button onClick={() => { navigate("/"); setActiveTab("ledger"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Ledger</button>
-                        <button onClick={() => { navigate("/"); setActiveTab("market"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Market</button>
-                        <button onClick={() => { navigate("/"); setActiveTab("stats"); setIsMenuOpen(false); }} className="text-2xl font-medium tracking-tight text-ink text-left">Stats</button>
+                <nav className="flex flex-col gap-10 overflow-y-auto pb-[calc(2rem + env(safe-area-inset-bottom))] custom-scrollbar">
+                    <div className="flex flex-col gap-2">
+                        <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-400 uppercase mb-4">Core Navigation</span>
+                        {[
+                          { id: "board", label: "Board", icon: <TrendingUp size={20} /> },
+                          { id: "analysis", label: "Analysis", icon: <MessageSquare size={20} /> },
+                          { id: "market", label: "Market", icon: <BarChart size={20} /> },
+                          { id: "stats", label: "Stats", icon: <Activity size={20} /> },
+                          { id: "ledger", label: "Ledger", icon: <Wallet size={20} /> },
+                        ].map((item) => (
+                           <button 
+                             key={item.id}
+                             onClick={() => { navigate("/"); (setActiveTab as any)(item.id); setIsMenuOpen(false); }} 
+                             className="flex items-center justify-between py-4 border-b border-zinc-100 group px-2"
+                           >
+                              <div className="flex items-center gap-6">
+                                <div className="text-zinc-400 group-active:text-zinc-900 transition-colors">
+                                  {item.icon}
+                                </div>
+                                <span className={cn(
+                                    "text-xl font-medium tracking-tight",
+                                    activeTab === item.id ? "text-zinc-900" : "text-zinc-500"
+                                )}>{item.label}</span>
+                              </div>
+                              <ChevronRight size={16} className="text-zinc-200" />
+                           </button>
+                        ))}
                     </div>
 
                     <div className="flex flex-col gap-6">
@@ -344,6 +381,47 @@ const CommandCenterModal = ({
     );
 };
 
+export interface ChatInputRef {
+  setText: (text: string) => void;
+}
+
+export const ChatInputForm = forwardRef<ChatInputRef, {
+  onSend: (text: string) => void;
+  hasAttachment: boolean;
+}>(({ onSend, hasAttachment }, ref) => {
+  const [text, setText] = useState("");
+  
+  useImperativeHandle(ref, () => ({
+    setText: (t: string) => setText(t)
+  }));
+  
+  return (
+    <form 
+      className="flex items-center gap-2 pr-1 w-full"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSend(text);
+        setText("");
+      }}
+    >
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Inquire institutional data..."
+        className="flex-1 bg-transparent border-none outline-none focus:ring-0 text-sm py-4 px-6 placeholder:text-zinc-300 font-medium w-full"
+      />
+      <button
+        type="submit"
+        disabled={!text.trim() && !hasAttachment}
+        className="w-12 h-12 flex items-center justify-center bg-zinc-900 border border-zinc-900 text-white rounded-full transition-all active:scale-90 disabled:opacity-20 flex-shrink-0"
+      >
+        <Send size={18} />
+      </button>
+    </form>
+  );
+});
+
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [authInitialized, setAuthInitialized] = useState(false);
@@ -351,7 +429,7 @@ export default function App() {
   const [odds, setOdds] = useState<SportOdds[]>([]);
   const [isLoadingOdds, setIsLoadingOdds] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState("");
+  const chatInputRef = useRef<ChatInputRef>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [attachment, setAttachment] = useState<{name: string, type: string, data: string} | null>(null);
   const [isListening, setIsListening] = useState(false);
@@ -390,10 +468,12 @@ export default function App() {
   const [minOdds, setMinOdds] = useState<string>("");
   const [maxOdds, setMaxOdds] = useState<string>("");
   const [showFilters, setShowFilters] = useState(false);
-  const [sharedArtifact, setSharedArtifact] = useState<string | null>(null);
+  const [sharedArtifact, setSharedArtifact] = useState<{ id: string, content: string } | null>(null);
   const [isLoadingArtifact, setIsLoadingArtifact] = useState(false);
   const [artifactsList, setArtifactsList] = useState<ArtifactMeta[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const navigate = useNavigate();
 
   const [aiStatus, setAiStatus] = useState<"checking" | "online" | "error">("checking");
@@ -433,18 +513,16 @@ export default function App() {
     const artifactId = params.get("artifact");
     if (artifactId) {
       setIsLoadingArtifact(true);
-      getDoc(doc(db, "artifacts", artifactId))
-        .then((docSnap) => {
-          if (docSnap.exists()) {
-            setSharedArtifact(docSnap.data().content);
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to load artifact", err);
-        })
-        .finally(() => {
-          setIsLoadingArtifact(false);
-        });
+      const unsubscribe = onSnapshot(doc(db, "artifacts", artifactId), (docSnap) => {
+        if (docSnap.exists()) {
+          setSharedArtifact({ id: artifactId, content: docSnap.data().content });
+        }
+        setIsLoadingArtifact(false);
+      }, (err) => {
+        console.error("Failed to load artifact", err);
+        setIsLoadingArtifact(false);
+      });
+      return () => unsubscribe();
     }
   }, []);
 
@@ -489,17 +567,17 @@ export default function App() {
     return "tomorrow"; // Default for future
   };
 
-  const allGamesSorted = [...odds].sort(
+  const allGamesSorted = [...(odds || [])].sort(
     (a, b) =>
       new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime(),
   );
 
-  const liveGames = allGamesSorted.filter((o) => o.status === "live");
+  const liveGames = allGamesSorted.filter((o) => o && o.status === "live");
   const upcomingGames = allGamesSorted.filter(
-    (o) => o.status === "upcoming" || !o.status,
+    (o) => o && (o.status === "upcoming" || !o.status),
   );
   const finalGames = allGamesSorted
-    .filter((o) => o.status === "final")
+    .filter((o) => o && o.status === "final")
     .sort(
       (a, b) =>
         new Date(b.commence_time).getTime() -
@@ -508,10 +586,10 @@ export default function App() {
   const featuredGames = [...liveGames, ...upcomingGames].slice(0, 3);
 
   const previousGames = allGamesSorted.filter(
-    (o) => categorizeGame(o.commence_time) === "previous",
+    (o) => o && categorizeGame(o.commence_time) === "previous",
   );
   let todayGames = allGamesSorted.filter(
-    (o) => categorizeGame(o.commence_time) === "today",
+    (o) => o && categorizeGame(o.commence_time) === "today",
   );
 
   // Sort live games first in today's games
@@ -522,7 +600,7 @@ export default function App() {
   });
 
   const tomorrowGames = allGamesSorted.filter(
-    (o) => categorizeGame(o.commence_time) === "tomorrow",
+    (o) => o && categorizeGame(o.commence_time) === "tomorrow",
   );
 
   const baseDateSlate =
@@ -533,6 +611,7 @@ export default function App() {
         : todayGames;
 
   const baseSlate = baseDateSlate.filter((game) => {
+     if (!game) return false;
      if (gameStatusFilter === "all") return true;
      if (gameStatusFilter === "live") return game.status === "live";
      if (gameStatusFilter === "ended") return game.status === "final";
@@ -540,30 +619,33 @@ export default function App() {
      return true;
   });
 
-  const sourceFilteredSlate = baseSlate.map(game => ({
+   const sourceFilteredSlate = baseSlate.map(game => ({
      ...game,
-     bookmakers: game.bookmakers.filter(b => 
+     bookmakers: (game.bookmakers || []).filter(b => 
        oddsSource === "prediction" ? b.key === "kalshi" : b.key !== "kalshi"
      )
   }));
 
   const allBookmakers = Array.from(
-    new Set(sourceFilteredSlate.flatMap((o) => o.bookmakers.map((b) => b.title))),
+    new Set(sourceFilteredSlate.flatMap((o) => (o.bookmakers || []).map((b) => b.title))),
   ).sort();
 
   const fullSlate = sourceFilteredSlate.filter((game) => {
+    // 0. Ensure games have bookmakers for the selected source if in prediction mode
+    if (oddsSource === "prediction" && (game.bookmakers || []).length === 0) return false;
+    
     // 1. Bookmaker Filter
     let hasBookie = true;
     if (selectedBookie !== "All Bookmakers") {
-      hasBookie = game.bookmakers.some((b) => b.title === selectedBookie);
+      hasBookie = (game.bookmakers || []).some((b) => b.title === selectedBookie);
     }
     if (!hasBookie) return false;
 
     // Get the bookie data we'll use for market/odds filtering
     const bookie =
       selectedBookie === "All Bookmakers"
-        ? game.bookmakers[0]
-        : game.bookmakers.find((b) => b.title === selectedBookie);
+        ? (game.bookmakers || [])[0]
+        : (game.bookmakers || []).find((b) => b.title === selectedBookie);
 
     // If a specific filter is set, and there's no bookie, hide it. However, if no specific filters are set, we can show it even without odds
     if (!bookie && (selectedMarket !== "all" || minOdds !== "" || maxOdds !== "")) {
@@ -573,7 +655,7 @@ export default function App() {
     if (bookie) {
       // 2. Market Filter
       if (selectedMarket !== "all") {
-        const hasMarket = bookie.markets.some((m) => m.key === selectedMarket);
+        const hasMarket = (bookie.markets || []).some((m) => m.key === selectedMarket);
         if (!hasMarket) return false;
       }
 
@@ -583,11 +665,11 @@ export default function App() {
         const max = maxOdds === "" ? Infinity : parseFloat(maxOdds);
 
         // Check if ANY outcome in ANY market matches the range
-        const matchesRange = bookie.markets.some((m) => {
+        const matchesRange = (bookie.markets || []).some((m) => {
           // If a specific market is selected, only check that one
           if (selectedMarket !== "all" && m.key !== selectedMarket) return false;
 
-          return m.outcomes.some((o) => {
+          return (m.outcomes || []).some((o) => {
             const price =
               typeof o.price === "string" ? parseFloat(o.price) : o.price;
             return price >= min && price <= max;
@@ -753,7 +835,7 @@ export default function App() {
                 .map((result: any) => result[0])
                 .map(result => result.transcript)
                 .join("");
-            setInputText(transcript);
+            chatInputRef.current?.setText(transcript);
         };
         recognition.onend = () => setIsListening(false);
         recognition.start();
@@ -781,10 +863,9 @@ export default function App() {
 
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-  const sendMessage = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    console.log("Sending message...", { inputText, attachment });
-    if ((!inputText.trim() && !attachment) || !user) return;
+  const sendMessage = async (textToUse: string) => {
+    console.log("Sending message...", { textToUse, attachment });
+    if ((!textToUse.trim() && !attachment) || !user) return;
 
     // Use default tier if userData didn't load properly yet
     const planTier = userData?.planTier || "free";
@@ -795,9 +876,8 @@ export default function App() {
       return;
     }
 
-    const userMessage: ChatMessage = { role: "user", text: inputText.trim() || "[Attachment]" };
-    const savedInputText = inputText.trim();
-    setInputText("");
+    const userMessage: ChatMessage = { role: "user", text: textToUse.trim() || "[Attachment]" };
+    const savedInputText = textToUse.trim();
     setAttachment(null);
     setIsTyping(true);
 
@@ -905,13 +985,13 @@ export default function App() {
   if (sharedArtifact) {
     return (
       <div className="h-full w-full bg-zinc-100 flex flex-col items-center overflow-auto py-12">
-        <div className="w-full max-w-[850px] flex items-center justify-between mb-4 px-6 xl:px-0">
+        <div className="w-full max-w-[1400px] flex items-center justify-between mb-4 px-6 xl:px-0">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 flex items-center justify-center font-serif italic text-xl font-medium text-brand select-none leading-none">
               B
             </div>
             <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
-              Document Artifact
+              Collaborative Document Artifact
             </span>
           </div>
           <button
@@ -921,12 +1001,8 @@ export default function App() {
             Create Your Own
           </button>
         </div>
-        <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[800px]">
-          <iframe
-            srcDoc={sharedArtifact}
-            className="w-full h-full min-h-[800px] border-none"
-            sandbox="allow-scripts allow-same-origin"
-          />
+        <div className="w-full max-w-[1400px] h-[800px] px-6 xl:px-0">
+           <CollaborativeEditor artifact={sharedArtifact} />
         </div>
       </div>
     );
@@ -1002,6 +1078,7 @@ export default function App() {
         isMenuOpen={isMenuOpen} 
         setIsMenuOpen={setIsMenuOpen} 
         setActiveTab={setActiveTab} 
+        activeTab={activeTab}
         navigate={navigate}
         slateFilter={slateFilter}
         setSlateFilter={setSlateFilter}
@@ -1130,11 +1207,11 @@ export default function App() {
             <div className="flex items-center gap-8">
                 <button
                     onClick={() => setIsMenuOpen(true)}
-                    className="md:hidden text-xs font-bold tracking-[0.2em] uppercase"
+                    className="md:hidden p-2 -ml-2 text-zinc-500 hover:text-zinc-900 transition-colors"
                 >
-                    Menu
+                    <LayoutGrid size={20} />
                 </button>
-                <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none pointer-events-none">
+                <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none pointer-events-none ml-2 md:ml-0">
                     B
                 </div>
                 
@@ -1241,6 +1318,34 @@ export default function App() {
             </div>
           </header>
 
+          {/* Persistent Mobile Bottom Navigation */}
+          <div className="md:hidden fixed bottom-0 left-0 right-0 z-[60] bg-white/95 backdrop-blur-2xl border-t border-zinc-200/80 pb-[env(safe-area-inset-bottom,1.5rem)] pt-2 px-4 flex items-center justify-around shadow-[0_-8px_30px_rgba(0,0,0,0.04)]">
+            <MobileNavIcon 
+              active={activeTab === "board"} 
+              onClick={() => setActiveTab("board")} 
+              label="Board" 
+              icon={<TrendingUp size={20} />} 
+            />
+            <MobileNavIcon 
+              active={activeTab === "analysis"} 
+              onClick={() => setActiveTab("analysis")} 
+              label="Analysis" 
+              icon={<MessageSquare size={20} />} 
+            />
+            <MobileNavIcon 
+              active={activeTab === "market"} 
+              onClick={() => setActiveTab("market")} 
+              label="Market" 
+              icon={<BarChart size={20} />} 
+            />
+            <MobileNavIcon 
+              active={activeTab === "ledger"} 
+              onClick={() => setActiveTab("ledger")} 
+              label="Ledger" 
+              icon={<Wallet size={20} />} 
+            />
+          </div>
+
           <div className="flex-1 flex flex-col overflow-hidden relative overscroll-contain no-scrollbar">
             <div className="flex-1 flex flex-col min-w-0 relative overflow-hidden pb-[64px] xl:pb-0">
               <Routes>
@@ -1256,7 +1361,15 @@ export default function App() {
                           exit={{ opacity: 0 }}
                           className="h-full flex flex-col max-w-4xl mx-auto w-full overflow-x-hidden overscroll-x-none touch-pan-y"
                         >
-                          <div className="flex-1 px-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto space-y-16 custom-scrollbar">
+                          <div 
+                            ref={chatScrollContainerRef}
+                            onScroll={(e) => {
+                              const target = e.currentTarget;
+                              const isNotAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight > 150;
+                              setShowScrollBottom(isNotAtBottom);
+                            }}
+                            className="flex-1 px-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto space-y-16 custom-scrollbar scroll-smooth"
+                          >
                             {messages.length === 0 && (
                               <div className="pb-12 pt-8">
                                 <div className="mb-8">
@@ -1493,25 +1606,34 @@ export default function App() {
                                             </span>
                                           </div>
                                           <div className="grid grid-cols-2 gap-4">
-                                            <PitcherDisplay
-                                              teamFull={odd.away_team}
-                                              name={odd.away_pitcher}
-                                              headshot={
-                                                odd.away_pitcher_headshot
-                                              }
-                                              record={odd.away_pitcher_record}
-                                              small
-                                            />
-                                            <PitcherDisplay
-                                              teamFull={odd.home_team}
-                                              name={odd.home_pitcher}
-                                              headshot={
-                                                odd.home_pitcher_headshot
-                                              }
-                                              record={odd.home_pitcher_record}
-                                              alignRight
-                                              small
-                                            />
+                                            {(odd.status === "live" && odd.situation_detail?.pitcher && odd.situation_detail?.batter) ? (
+                                              <>
+                                                <PitcherDisplay teamFull="Pitching" name={odd.situation_detail.pitcher.name || "TBA"} headshot={odd.situation_detail.pitcher.headshot} record={getPitcherLiveStats(odd.situation_detail.pitcher, odd)} small />
+                                                <PitcherDisplay teamFull="Batting" name={odd.situation_detail.batter.name || "TBA"} headshot={odd.situation_detail.batter.headshot} record={odd.situation_detail.batter.summary || "Hitting"} alignRight small />
+                                              </>
+                                            ) : (
+                                              <>
+                                                <PitcherDisplay
+                                                  teamFull={odd.away_team}
+                                                  name={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.name : odd.away_pitcher}
+                                                  headshot={
+                                                    odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.headshot : odd.away_pitcher_headshot
+                                                  }
+                                                  record={odd.status === "live" && odd.away_live_pitcher ? getPitcherLiveStats(odd.away_live_pitcher) : odd.away_pitcher_record}
+                                                  small
+                                                />
+                                                <PitcherDisplay
+                                                  teamFull={odd.home_team}
+                                                  name={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.name : odd.home_pitcher}
+                                                  headshot={
+                                                    odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.headshot : odd.home_pitcher_headshot
+                                                  }
+                                                  record={odd.status === "live" && odd.home_live_pitcher ? getPitcherLiveStats(odd.home_live_pitcher) : odd.home_pitcher_record}
+                                                  alignRight
+                                                  small
+                                                />
+                                              </>
+                                            )}
                                           </div>
                                         </div>
                                       )}
@@ -1533,12 +1655,27 @@ export default function App() {
                             )}
                             <div ref={chatEndRef} />
                           </div>
-
-                          {/* Input Area */}
-                          <div className="p-2 pb-[env(safe-area-inset-bottom,0.5rem)] md:p-6 sticky bottom-0 md:bottom-4 z-50 flex justify-center">
-                            <div className="w-full max-w-2xl bg-white shadow-[0_4px_24px_rgba(0,0,0,0.08)] border border-zinc-200 rounded-[2rem] p-1.5 flex flex-col gap-2 relative">
+                                                  {/* Input Area */}
+                          <div className="p-4 safe-bottom sticky bottom-0 z-50 flex justify-center w-full bg-gradient-to-t from-white via-white/100 to-transparent pt-12 relative">
+                            <AnimatePresence>
+                              {showScrollBottom && (
+                                <motion.button
+                                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                                  transition={{ duration: 0.2 }}
+                                  onClick={() => {
+                                    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                                  }}
+                                  className="absolute -top-4 left-1/2 -translate-x-1/2 w-10 h-10 flex items-center justify-center bg-white border border-zinc-200 text-zinc-500 hover:text-zinc-900 rounded-full shadow-lg hover:shadow-xl transition-all active:scale-95 z-50"
+                                >
+                                  <ChevronDown size={18} />
+                                </motion.button>
+                              )}
+                            </AnimatePresence>
+                            <div className="w-full max-w-2xl bg-white shadow-float border border-zinc-200/50 rounded-[2.5rem] p-2 flex flex-col gap-3 relative">
                               {/* Modes */}
-                              <div className="flex gap-1">
+                              <div className="flex gap-1.5 px-1 py-1">
                                 {(["live", "stats", "trends"] as const).map(
                                   (mode) => {
                                     const isActive = groundingMode === mode;
@@ -1548,10 +1685,10 @@ export default function App() {
                                         type="button"
                                         onClick={() => toggleMode(mode)}
                                         className={cn(
-                                          "flex-1 flex items-center justify-center transition-all text-[9px] rounded-full px-3 py-1.5 tracking-[0.1em] uppercase font-bold",
+                                          "flex-1 flex items-center justify-center transition-all text-[9px] rounded-full py-2 tracking-[0.1em] uppercase font-black",
                                           isActive
                                             ? "bg-zinc-900 text-white"
-                                            : "bg-white text-zinc-400 hover:text-zinc-900",
+                                            : "bg-zinc-100 text-zinc-400 hover:text-zinc-900",
                                         )}
                                       >
                                         {mode}
@@ -1560,75 +1697,32 @@ export default function App() {
                                   },
                                 )}
                               </div>
-                            {messages.length === 0 && (
-                              <div className="flex flex-wrap gap-2 mb-5">
-                                {getSuggestions().map((sug, idx) => (
-                                  <button
-                                    key={idx}
-                                    type="button"
-                                    onClick={() => setInputText(sug)}
-                                    className="text-[11px] bg-zinc-50/80 border border-zinc-200/60 text-zinc-500 px-4 py-2.5 rounded-full hover:bg-white hover:text-zinc-900 hover:border-zinc-300 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-all duration-300"
-                                  >
-                                    {sug}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Actual Input Container */}
-                             <div className="w-full flex flex-col gap-2">
-                                    {attachment && (
-                                        <div className="bg-zinc-100 rounded-lg p-2 flex items-center gap-2 text-xs text-zinc-600">
-                                            <span>{attachment.name}</span>
-                                            <button onClick={() => setAttachment(null)} className="ml-auto hover:text-red-500">
-                                                <X size={14} />
-                                            </button>
-                                        </div>
-                                    )}
-                                    <div className="flex items-end gap-3 w-full bg-white border border-zinc-200 rounded-xl px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-brand/20 transition-all">
-                                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*,application/pdf" onChange={handleFileChange} />
-                                        <button title="Upload file" className="text-zinc-600 hover:text-zinc-900 p-1 shrink-0" onClick={() => fileInputRef.current?.click()}>
-                                            <Plus size={20} />
-                                        </button>
-                                        <button title="Add URL Context" className="text-zinc-600 hover:text-zinc-900 p-1 shrink-0" onClick={() => {
-                                            setInputText(prev => prev ? `${prev}\nGround this context: https://` : `Ground this context: https://`);
-                                        }}>
-                                            <Link2 size={20} />
-                                        </button>
-                                        <textarea
-                                            value={inputText}
-                                            onChange={(e) => setInputText(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === "Enter" && !e.shiftKey) {
-                                                    e.preventDefault();
-                                                    sendMessage();
-                                                }
-                                            }}
-                                            className="flex-1 text-sm bg-transparent outline-none p-1 text-zinc-900 resize-none min-h-[24px] max-h-32 placeholder-zinc-400"
-                                            placeholder="Ask for anything or paste a link..."
-                                            rows={1}
-                                            style={{ height: 'auto' }}
-                                            onInput={(e: any) => {
-                                                e.target.style.height = 'auto';
-                                                e.target.style.height = e.target.scrollHeight + 'px';
-                                            }}
-                                        />
-                                        <button className={cn("text-zinc-600 hover:text-zinc-900 p-1 shrink-0 transition-colors", isListening ? "text-red-500 animate-pulse" : "")} onClick={handleVoiceToggle}>
-                                            <Mic size={20} />
-                                        </button>
-                                        <button 
-                                            onClick={() => {sendMessage();}}
-                                            className={cn("p-1 shrink-0 transition-colors text-zinc-500", (inputText.trim() || attachment) ? "text-zinc-900" : "")}
-                                            disabled={!inputText.trim() && !attachment}
-                                        >
-                                            <Send size={20} />
-                                        </button>
-                                    </div>
-                                </div>
+<ChatInputForm onSend={sendMessage} hasAttachment={!!attachment} ref={chatInputRef} />
                             </div>
-                        </div>
-                </motion.div>
-              )}
+                          </div>
+                          {messages.length === 0 && (
+                            <div className="flex-1 flex items-center justify-center -mt-20">
+                              <div className="w-full max-w-lg mx-auto flex flex-col gap-6">
+                                <div className="text-center space-y-2 mb-4">
+                                  <h4 className="text-zinc-400 text-[10px] uppercase font-bold tracking-[0.4em]">Suggested Inquiries</h4>
+                                </div>
+                                <div className="flex flex-wrap gap-2 justify-center">
+                                  {getSuggestions().map((sug, idx) => (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      onClick={() => sendMessage(sug)}
+                                      className="text-[11px] bg-white border border-zinc-200/60 text-zinc-500 px-5 py-3 rounded-2xl hover:border-zinc-900 hover:text-zinc-900 transition-all active:scale-95 shadow-sm"
+                                    >
+                                      {sug}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
 
                       {activeTab === "board" && (
                         <motion.div
@@ -1638,59 +1732,117 @@ export default function App() {
                           exit={{ opacity: 0 }}
                           className="h-full px-4 py-6 md:px-10 md:py-10 lg:px-12 lg:py-12 overflow-y-auto custom-scrollbar"
                         >
-                          <div className="max-w-6xl mx-auto space-y-8">
-                            <div className="flex flex-col border-b border-zinc-100 md:pb-10 md:gap-6">
+                          <div className="max-w-6xl mx-auto space-y-4 md:space-y-8">
+                            <div className="flex flex-col md:border-b md:border-zinc-100 md:pb-10 md:gap-6 pt-2 md:pt-0">
+                              {/* MOBILE HEADER (<768px) */}
+                              <div className="md:hidden space-y-6 mb-8 px-2">
+                                <div className="space-y-2">
+                                  <h2 className="text-4xl font-bold text-zinc-900 tracking-tight">
+                                    The Board
+                                  </h2>
+                                  <p className="text-zinc-500 text-sm font-medium leading-relaxed">
+                                    Live institutional statistics and multi-market sportsbook anchors.
+                                  </p>
+                                </div>
+                                
+                                <div className="flex flex-col gap-5">
+                                  <div className="flex items-center justify-between p-1 bg-zinc-50 border border-zinc-100 rounded-xl">
+                                    {[
+                                      { label: "Books", val: "sportsbook" },
+                                      { label: "Prediction", val: "prediction" }
+                                    ].map((source) => (
+                                      <button
+                                        key={source.val}
+                                        onClick={() => {
+                                          setOddsSource(source.val as any);
+                                          setSelectedBookie("All Bookmakers");
+                                        }}
+                                        className={cn(
+                                          "flex-1 text-[10px] uppercase tracking-widest font-black py-3 rounded-lg transition-all duration-300",
+                                          oddsSource === source.val
+                                            ? "bg-white text-zinc-900 shadow-sm border border-zinc-200/50"
+                                            : "text-zinc-400"
+                                        )}
+                                      >
+                                        {source.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
+                                    {["all", "live", "pregame", "ended"].map((filter) => (
+                                      <button
+                                        key={filter}
+                                        onClick={() => setGameStatusFilter(filter as any)}
+                                        className={cn(
+                                          "shrink-0 px-4 py-2 rounded-full text-[10px] uppercase font-black tracking-widest border transition-all",
+                                          gameStatusFilter === filter
+                                            ? "bg-zinc-900 border-zinc-900 text-white"
+                                            : "bg-white border-zinc-100 text-zinc-400"
+                                        )}
+                                      >
+                                        {filter}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+
                               {/* DESKTOP HEADER (>768px) */}
                               <div className="hidden md:flex flex-row items-end justify-between gap-6 pb-4 md:pb-0">
                                 <div>
-                                  <h2 className="text-4xl serif-italic font-medium text-zinc-900 tracking-tight mb-8">
-                                    The Daily Board
-                                  </h2>
-                                  <div className="hidden md:flex items-center gap-4">
-                                    <div className="flex items-center gap-6 inline-flex">
-                                      {["previous", "today", "tomorrow"].map(
-                                        (filter) => (
-                                          <button
-                                            key={filter}
-                                            onClick={() =>
-                                              setSlateFilter(filter as any)
-                                            }
-                                            className={cn(
-                                              "text-[11px] uppercase tracking-[0.2em] transition-colors",
-                                              slateFilter === filter
-                                                ? "text-zinc-900 font-medium"
-                                                : "text-zinc-400 hover:text-zinc-600",
-                                            )}
-                                          >
-                                            {filter}
-                                          </button>
-                                        ),
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-6 inline-flex">
-                                      {["all", "pregame", "live", "ended"].map(
-                                        (filter) => (
-                                          <button
-                                            key={filter}
-                                            onClick={() =>
-                                              setGameStatusFilter(filter as any)
-                                            }
-                                            className={cn(
-                                              "text-[11px] uppercase tracking-[0.2em] transition-colors",
-                                              gameStatusFilter === filter
-                                                ? "text-zinc-900 font-medium"
-                                                : "text-zinc-400 hover:text-zinc-600",
-                                            )}
-                                          >
-                                            {filter}
-                                          </button>
-                                        ),
-                                      )}
-                                    </div>
-                                    <div className="flex items-center p-1 bg-zinc-100/60 rounded-xl border border-zinc-200/50 inline-flex">
+                    <h2 className="text-5xl md:text-6xl font-bold text-zinc-900 tracking-[-0.03em] mb-4">
+                      The Board
+                    </h2>
+                    <p className="text-zinc-400 font-medium tracking-tight mb-8 max-w-lg">
+                      Institutional statistics and market board anchors. High-frequency updates from major sportsbooks.
+                    </p>
+                    <div className="hidden md:flex items-center gap-6">
+                      <div className="flex items-center gap-8">
+                        {["previous", "today", "tomorrow"].map(
+                          (filter) => (
+                            <button
+                              key={filter}
+                              onClick={() =>
+                                setSlateFilter(filter as any)
+                              }
+                              className={cn(
+                                "text-[10px] uppercase tracking-[0.25em] font-black transition-all",
+                                slateFilter === filter
+                                  ? "text-zinc-900 border-b-2 border-zinc-900 pb-1"
+                                  : "text-zinc-300 hover:text-zinc-500 pb-1 border-b-2 border-transparent",
+                              )}
+                            >
+                              {filter}
+                            </button>
+                          ),
+                        )}
+                      </div>
+                      <div className="h-4 w-[1px] bg-zinc-200 mx-2" />
+                      <div className="flex items-center gap-6">
+                        {["all", "live", "pregame", "ended"].map(
+                          (filter) => (
+                            <button
+                              key={filter}
+                              onClick={() =>
+                                setGameStatusFilter(filter as any)
+                              }
+                              className={cn(
+                                "text-[10px] uppercase tracking-[0.25em] font-black transition-all",
+                                gameStatusFilter === filter
+                                  ? "text-zinc-900"
+                                  : "text-zinc-300 hover:text-zinc-500",
+                              )}
+                            >
+                              {filter}
+                            </button>
+                          ),
+                        )}
+                      </div>
+              <div className="hidden md:flex items-center p-1 bg-zinc-50 border border-zinc-100 rounded-full inline-flex">
                                       {[
-                                        { label: "Sportsbooks", val: "sportsbook" },
-                                        { label: "Prediction Markets", val: "prediction" }
+                                        { label: "Bookmakers", val: "sportsbook" },
+                                        { label: "Predictions", val: "prediction" }
                                       ].map((source) => (
                                         <button
                                           key={source.val}
@@ -1699,10 +1851,10 @@ export default function App() {
                                             setSelectedBookie("All Bookmakers");
                                           }}
                                           className={cn(
-                                            "text-[10px] uppercase tracking-widest font-bold px-4 py-2 rounded-lg transition-all duration-300",
+                                            "text-[9px] uppercase tracking-widest font-black px-5 py-2.5 rounded-full transition-all duration-500",
                                             oddsSource === source.val
-                                              ? "bg-zinc-900 text-white shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
-                                              : "text-zinc-500 hover:text-zinc-700",
+                                              ? "bg-zinc-900 text-white shadow-lg"
+                                              : "text-zinc-400 hover:text-zinc-600",
                                           )}
                                         >
                                           {source.label}
@@ -1902,7 +2054,7 @@ export default function App() {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
-                          className="p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 h-full flex flex-col overflow-y-auto"
+                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar pb-[calc(80px+env(safe-area-inset-bottom,1.5rem))]"
                         >
                           <div className="max-w-3xl">
                             <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-2">
@@ -2019,13 +2171,15 @@ export default function App() {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
-                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar"
+                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar pb-[calc(80px+env(safe-area-inset-bottom,1.5rem))]"
                         >
                             <div className="max-w-5xl mx-auto">
-                                <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-12">
+                                <h2 className="text-3xl md:text-4xl serif-italic font-medium text-ink tracking-tight mb-8 md:mb-12">
                                   Team Statistics
                                 </h2>
-                                <TeamStatsTable />
+                                <div className="overflow-x-auto no-scrollbar -mx-6 px-6 md:mx-0 md:px-0">
+                                  <TeamStatsTable />
+                                </div>
                             </div>
                         </motion.div>
                       )}
@@ -2036,19 +2190,19 @@ export default function App() {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
-                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar"
+                          className="h-full p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 overflow-y-auto custom-scrollbar pb-[calc(80px+env(safe-area-inset-bottom,1.5rem))]"
                         >
                           <div className="max-w-5xl mx-auto">
-                            <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-zinc-100 pb-10 mb-12 gap-6">
-                              <div>
-                                <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">
+                            <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-zinc-100 pb-10 mb-8 md:mb-12 gap-6">
+                              <div className="space-y-4">
+                                <h2 className="text-3xl md:text-4xl serif-italic font-medium text-ink tracking-tight">
                                   Schedule
                                 </h2>
-                                <p className="text-zinc-400 text-[10px] uppercase tracking-[0.4em] font-bold mt-4">
+                                <p className="text-zinc-500 text-[10px] uppercase tracking-[0.4em] font-bold">
                                   Rotations & Line Metrics
                                 </p>
                               </div>
-                              <div className="flex items-center bg-white border border-zinc-200 rounded-xl px-4 py-2 w-full md:w-64 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand/20 transition-all">
+                              <div className="flex items-center bg-white border border-zinc-200 rounded-2xl px-4 py-3 w-full md:w-64 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand/20 transition-all shadow-sm">
                                 <Search size={16} className="text-zinc-400 mr-2" />
                                 <input
                                   type="text"
@@ -2137,23 +2291,28 @@ export default function App() {
                                     >
                                       {/* Left side: Time & Teams */}
                                       <div className="flex-1">
-                                        <div className="flex items-center gap-3 mb-4">
-                                          <span className="font-mono text-[10px] bg-zinc-100 text-zinc-500 px-2 py-1 rounded font-bold uppercase tracking-widest">
+                                        <div className="flex items-center gap-3 mb-4 flex-wrap">
+                                          <span className="font-mono text-[10px] bg-zinc-100 text-zinc-600 px-2 py-1 rounded font-bold uppercase tracking-widest">
                                             {new Date(odd.commence_time).toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric' })}
                                           </span>
                                           <span className="font-mono text-[10px] text-brand border border-brand/20 bg-brand/5 px-2 py-1 rounded font-bold uppercase tracking-widest">
                                             {(odd.status === 'final' || odd.status === 'finished' || odd.status === 'completed') ? "FINAL" : 
                                                new Date(odd.commence_time).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' }) + " PT"}
                                           </span>
+                                          {odd.weather && odd.status !== "live" && (
+                                            <span className="font-mono text-[10px] bg-zinc-50 border border-zinc-100 text-zinc-500 px-2 py-1 rounded font-bold uppercase tracking-widest ml-auto hidden sm:block">
+                                              {odd.weather.display}
+                                            </span>
+                                          )}
                                         </div>
                                         
                                         <div className="space-y-3">
                                           <div className="flex items-center justify-between">
-                                            <span className="text-lg font-medium text-zinc-600 group-hover:text-ink transition-colors">{odd.away_team}</span>
+                                            <span className="text-lg font-medium text-zinc-800 group-hover:text-ink transition-colors">{odd.away_team}</span>
                                             {maxAwayML > 0 && <span className="font-mono text-sm px-2 py-1 bg-zinc-50 rounded hidden md:block">{toAmerican(1 / maxAwayML)}</span>}
                                           </div>
                                           <div className="flex items-center justify-between">
-                                            <span className="text-lg font-medium text-zinc-600 group-hover:text-ink transition-colors">{odd.home_team}</span>
+                                            <span className="text-lg font-medium text-zinc-800 group-hover:text-ink transition-colors">{odd.home_team}</span>
                                             {maxHomeML > 0 && <span className="font-mono text-sm px-2 py-1 bg-zinc-50 rounded hidden md:block">{toAmerican(1 / maxHomeML)}</span>}
                                           </div>
                                         </div>
@@ -2162,25 +2321,25 @@ export default function App() {
                                       {/* Right side: Line Metrics */}
                                       <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8 pt-6 md:pt-0 border-t md:border-t-0 border-zinc-100 md:pl-8 md:border-l">
                                         <div>
-                                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">True Odds</p>
+                                          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">True Odds</p>
                                           <div className="space-y-1">
                                             <p className="font-mono text-sm text-ink">{trueAway}</p>
                                             <p className="font-mono text-sm text-ink">{trueHome}</p>
                                           </div>
                                         </div>
                                         <div>
-                                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Win Prob</p>
+                                          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Win Prob</p>
                                           <div className="space-y-1">
-                                            <p className="font-mono text-sm text-zinc-500">{(trueAwayProb * 100).toFixed(1)}%</p>
-                                            <p className="font-mono text-sm text-zinc-500">{(trueHomeProb * 100).toFixed(1)}%</p>
+                                            <p className="font-mono text-sm text-zinc-600">{(trueAwayProb * 100).toFixed(1)}%</p>
+                                            <p className="font-mono text-sm text-zinc-600">{(trueHomeProb * 100).toFixed(1)}%</p>
                                           </div>
                                         </div>
                                         <div className="col-span-2 md:col-span-1">
-                                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Market</p>
+                                          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Market</p>
                                           <div className="space-y-1">
-                                            <p className="font-mono text-xs text-zinc-500"><span className="text-zinc-400 mr-2">Vig:</span>{vigPct}%</p>
-                                            {consensusTotal && <p className="font-mono text-xs text-zinc-500"><span className="text-zinc-400 mr-2">Total:</span>{consensusTotal}</p>}
-                                            {odd.venue && <p className="font-mono text-[10px] text-zinc-400 mt-2 truncate w-[100px]" title={odd.venue}>{odd.venue}</p>}
+                                            <p className="font-mono text-xs text-zinc-600"><span className="text-zinc-500 mr-2">Vig:</span>{vigPct}%</p>
+                                            {consensusTotal && <p className="font-mono text-xs text-zinc-600"><span className="text-zinc-500 mr-2">Total:</span>{consensusTotal}</p>}
+                                            {odd.venue && <p className="font-mono text-[10px] text-zinc-500 mt-2 truncate w-[100px]" title={odd.venue}>{odd.venue}</p>}
                                           </div>
                                         </div>
                                       </div>
@@ -2288,7 +2447,7 @@ export default function App() {
                                   {odd.status === "live" && (
                                     <span className="w-1.5 h-1.5 rounded-full bg-zinc-900" />
                                   )}
-                                  <span className="text-[9px] uppercase tracking-widest font-black text-zinc-400 group-hover:text-zinc-900 transition-colors">
+                                  <span className="text-[9px] uppercase tracking-widest font-black text-zinc-500 group-hover:text-zinc-800 transition-colors">
                                     {odd.status === "live" ? (
                                       <span className="text-zinc-900">{odd.inning_half && odd.inning ? `${odd.inning_half} ${odd.inning}` : "Live"}{odd.situation ? ` • ${odd.situation}` : ""}</span>
                                     ) : odd.status === "final" ? (
@@ -2300,8 +2459,13 @@ export default function App() {
                                       })
                                     )}
                                     {bookmaker?.title && (
-                                      <span className="ml-2 text-zinc-300 group-hover:text-zinc-400 transition-colors">
+                                      <span className="ml-2 text-zinc-400 group-hover:text-zinc-500 transition-colors">
                                         ({bookmaker.title})
+                                      </span>
+                                    )}
+                                    {odd.weather && odd.status !== "live" && (
+                                      <span className="ml-2 text-zinc-500 group-hover:text-zinc-700 transition-colors hidden md:inline">
+                                        • {odd.weather.display}
                                       </span>
                                     )}
                                   </span>
@@ -2321,7 +2485,7 @@ export default function App() {
                                   ) : (
                                     <div className="flex flex-col gap-1 font-serif-italic">
                                       <span>{odd.away_team}</span>
-                                      <span className="text-zinc-400 text-xs">at {odd.home_team}</span>
+                                      <span className="text-zinc-500 text-xs text-medium">at {odd.home_team}</span>
                                     </div>
                                   )}
                                 </div>
@@ -2329,13 +2493,13 @@ export default function App() {
                               <div className="text-right flex flex-col items-end gap-2">
                                 {moneylineStr && (
                                   <div className="flex items-baseline gap-2">
-                                    <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-300 group-hover:text-zinc-400 transition-colors">ML</span>
+                                    <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-400 group-hover:text-zinc-500 transition-colors">ML</span>
                                     <span className="font-mono text-sm text-zinc-700 group-hover:text-zinc-900 transition-colors">{moneylineStr}</span>
                                   </div>
                                 )}
                                 {totalPoint && (
                                   <div className="flex items-baseline gap-2">
-                                    <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-300 group-hover:text-zinc-400 transition-colors">O/U</span>
+                                    <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-400 group-hover:text-zinc-500 transition-colors">O/U</span>
                                     <span className="font-mono text-sm text-zinc-700 group-hover:text-zinc-900 transition-colors">{totalPoint}</span>
                                   </div>
                                 )}
@@ -2346,11 +2510,20 @@ export default function App() {
                             {(odd.away_pitcher || odd.home_pitcher) && (
                               <div className="w-full mt-4 pt-4 border-t border-zinc-200/40 opacity-70 group-hover:opacity-100 transition-opacity">
                                 <div className="flex items-center gap-1.5 mb-3">
-                                  <span className="text-[8px] uppercase tracking-[0.2em] font-bold text-zinc-400">Matchup</span>
+                                  <span className="text-[8px] uppercase tracking-[0.2em] font-bold text-zinc-500">Matchup</span>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
-                                  <PitcherDisplay teamFull={odd.away_team} name={odd.away_pitcher} headshot={odd.away_pitcher_headshot} record={odd.away_pitcher_record} small />
-                                  <PitcherDisplay teamFull={odd.home_team} name={odd.home_pitcher} headshot={odd.home_pitcher_headshot} record={odd.home_pitcher_record} alignRight small />
+                                  {(odd.status === "live" && odd.situation_detail?.pitcher && odd.situation_detail?.batter) ? (
+                                    <>
+                                      <PitcherDisplay teamFull="Pitching" name={odd.situation_detail.pitcher.name || "TBA"} headshot={odd.situation_detail.pitcher.headshot} record={getPitcherLiveStats(odd.situation_detail.pitcher, odd)} small />
+                                      <PitcherDisplay teamFull="Batting" name={odd.situation_detail.batter.name || "TBA"} headshot={odd.situation_detail.batter.headshot} record={odd.situation_detail.batter.summary || "Hitting"} alignRight small />
+                                    </>
+                                  ) : (
+                                    <>
+                                      <PitcherDisplay teamFull={odd.away_team} name={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.name : odd.away_pitcher} headshot={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.headshot : odd.away_pitcher_headshot} record={odd.status === "live" && odd.away_live_pitcher ? getPitcherLiveStats(odd.away_live_pitcher) : odd.away_pitcher_record} small />
+                                      <PitcherDisplay teamFull={odd.home_team} name={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.name : odd.home_pitcher} headshot={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.headshot : odd.home_pitcher_headshot} record={odd.status === "live" && odd.home_live_pitcher ? getPitcherLiveStats(odd.home_live_pitcher) : odd.home_pitcher_record} alignRight small />
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -2364,7 +2537,7 @@ export default function App() {
                   {finalGames.length > 0 && (
                     <div className="border-t border-zinc-200/50 bg-zinc-50/50 mt-4 rounded-b-[2rem]">
                       <div className="px-6 xl:px-8 py-5 border-b border-zinc-200/40">
-                        <span className="text-[10px] font-bold tracking-[0.2em] text-zinc-400 uppercase">
+                        <span className="text-[10px] font-bold tracking-[0.2em] text-zinc-500 uppercase">
                           Recent Finals
                         </span>
                       </div>
@@ -2388,7 +2561,7 @@ export default function App() {
                                     <span className="font-mono text-zinc-900 font-bold mr-2">{odd.home_score || "0"}</span>
                                   </div>
                                </div>
-                               <ChevronRight className="w-4 h-4 text-zinc-300 group-hover:text-zinc-500 transition-colors" />
+                               <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-zinc-600 transition-colors" />
                             </div>
                           </Link>
                         ))}
@@ -2504,6 +2677,301 @@ function SideNavIcon({
         {icon}
       </div>
     </button>
+  );
+}
+
+function RechartsDataBlock({ codeString }: { codeString: string }) {
+  try {
+    const configData = JSON.parse(codeString);
+    if (!configData || !configData.type || !configData.data || !configData.config) {
+      throw new Error("Invalid Recharts block structure");
+    }
+
+    const { type, data, config } = configData;
+    const isLine = type === "LineChart";
+    const isBar = type === "BarChart";
+    const isScatter = type === "ScatterChart";
+    const isArea = type === "AreaChart";
+    const isPie = type === "PieChart";
+
+    const ChartComponent = isLine ? LineChart : isBar ? RechartsBarChart : isScatter ? ScatterChart : isArea ? AreaChart : isPie ? PieChart : LineChart;
+    
+    return (
+      <div className="my-6 rounded-[2.5rem] bg-white border border-zinc-200 p-6 shadow-sm w-full h-[450px]">
+        <div className="flex items-center justify-between border-b border-zinc-100 pb-3 mb-6">
+          <span className="font-mono text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]">
+            Data Visualization ({type})
+          </span>
+        </div>
+        <div className="w-full h-[350px]">
+          <ResponsiveContainer width="100%" height="100%">
+            {/* @ts-ignore */}
+            <ChartComponent data={data}>
+              {!isPie && <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />}
+              {isScatter ? (
+                <>
+                  <XAxis dataKey={config.xAxisKey} type={config.xAxisType || "category"} tick={{ fontSize: 12, fill: "#71717a" }} axisLine={{ stroke: "#e4e4e7" }} tickLine={false} />
+                  <YAxis dataKey={config.yAxisKey} type={config.yAxisType || "number"} tick={{ fontSize: 12, fill: "#71717a" }} axisLine={false} tickLine={false} />
+                  {config.zAxisKey && <ZAxis dataKey={config.zAxisKey} type="number" range={config.zAxisRange || [50, 400]} />}
+                </>
+              ) : !isPie ? (
+                <>
+                  <XAxis dataKey={config.xAxisKey} tick={{ fontSize: 12, fill: "#71717a" }} axisLine={{ stroke: "#e4e4e7" }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: "#71717a" }} axisLine={false} tickLine={false} />
+                </>
+              ) : null}
+              <RechartsTooltip 
+                contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)" }}
+                itemStyle={{ fontSize: "14px", fontWeight: "600" }}
+                labelStyle={{ fontSize: "12px", color: "#71717a", marginBottom: "4px" }}
+              />
+              <Legend wrapperStyle={{ fontSize: "12px", color: "#52525b" }} iconType="circle" />
+              
+              {isPie && config.series?.map((s: any, idx: number) => (
+                <Pie 
+                  key={idx} 
+                  data={data} 
+                  dataKey={s.dataKey} 
+                  nameKey={config.xAxisKey} 
+                  cx="50%" 
+                  cy="50%" 
+                  outerRadius={s.outerRadius || 120} 
+                  innerRadius={s.innerRadius || 60} 
+                  paddingAngle={5}
+                >
+                  {data.map((entry: any, index: number) => (
+                    <Cell key={`cell-${index}`} fill={config.colors?.[index % config.colors.length] || "#09090b"} />
+                  ))}
+                </Pie>
+              ))}
+
+              {!isPie && config.series?.map((s: any, idx: number) => {
+                if (isLine) {
+                  return <Line key={idx} type="monotone" dataKey={s.dataKey} name={s.name} stroke={s.color || "#09090b"} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} />;
+                }
+                if (isBar) {
+                  return <Bar key={idx} dataKey={s.dataKey} name={s.name} fill={s.color || "#09090b"} radius={[4, 4, 0, 0]} />;
+                }
+                if (isScatter) {
+                  return <Scatter key={idx} name={s.name} dataKey={s.dataKey || config.yAxisKey} fill={s.color || "#09090b"} />;
+                }
+                if (isArea) {
+                  return <Area key={idx} type="monotone" dataKey={s.dataKey} name={s.name} stroke={s.color || "#09090b"} fill={s.color || "#09090b"} fillOpacity={0.3} />;
+                }
+                return null;
+              })}
+            </ChartComponent>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  } catch (e: any) {
+    return (
+      <div className="my-6 p-4 rounded-xl bg-red-50 text-red-600 border border-red-100 font-mono text-xs">
+        Failed to render chart: {e.message}
+      </div>
+    );
+  }
+}
+
+function D3DataBlock({ codeString }: { codeString: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
+    let configData;
+    try {
+      configData = JSON.parse(codeString);
+    } catch (e) {
+      console.error("Invalid D3 config");
+      return;
+    }
+
+    const { type, data, config } = configData;
+    const width = containerRef.current.clientWidth;
+    const height = 350;
+
+    // Clear previous
+    d3.select(containerRef.current).selectAll("*").remove();
+
+    const svg = d3.select(containerRef.current)
+      .append("svg")
+      .attr("width", "100%")
+      .attr("height", "100%")
+      .attr("viewBox", `0 0 ${width} ${height}`);
+
+    if (type === "NetworkGraph") {
+      const { nodes, links } = data;
+      
+      const simulation = d3.forceSimulation(nodes)
+        .force("link", (d3.forceLink(links) as any).id((d: any) => d.id).distance(config?.distance || 50))
+        .force("charge", d3.forceManyBody().strength(config?.strength || -100))
+        .force("center", d3.forceCenter(width / 2, height / 2));
+
+      const link = svg.append("g")
+        .selectAll("line")
+        .data(links)
+        .join("line")
+        .attr("stroke", "#e4e4e7")
+        .attr("stroke-width", 1.5);
+
+      const node = svg.append("g")
+        .selectAll("circle")
+        .data(nodes)
+        .join("circle")
+        .attr("r", (d: any) => d.radius || 8)
+        .attr("fill", (d: any) => d.color || "#09090b")
+        .call(d3.drag()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended) as any);
+
+      node.append("title")
+        .text((d: any) => d.label || d.id);
+
+      simulation.on("tick", () => {
+        link
+          .attr("x1", (d: any) => d.source.x)
+          .attr("y1", (d: any) => d.source.y)
+          .attr("x2", (d: any) => d.target.x)
+          .attr("y2", (d: any) => d.target.y);
+
+        node
+          .attr("cx", (d: any) => d.x)
+          .attr("cy", (d: any) => d.y);
+      });
+
+      function dragstarted(event: any) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        event.subject.fx = event.subject.x;
+        event.subject.fy = event.subject.y;
+      }
+      
+      function dragged(event: any) {
+        event.subject.fx = event.x;
+        event.subject.fy = event.y;
+      }
+      
+      function dragended(event: any) {
+        if (!event.active) simulation.alphaTarget(0);
+        event.subject.fx = null;
+        event.subject.fy = null;
+      }
+    } else if (type === "Heatmap") {
+       const margin = {top: 20, right: 20, bottom: 30, left: 40};
+       const innerWidth = width - margin.left - margin.right;
+       const innerHeight = height - margin.top - margin.bottom;
+
+       const xGroups = Array.from(new Set(data.map((d: any) => d[config?.xAxisKey])));
+       const yGroups = Array.from(new Set(data.map((d: any) => d[config?.yAxisKey])));
+
+       const x = d3.scaleBand()
+         .range([0, innerWidth])
+         .domain(xGroups as string[])
+         .padding(0.05);
+
+       const y = d3.scaleBand()
+         .range([innerHeight, 0])
+         .domain(yGroups as string[])
+         .padding(0.05);
+
+       const colorScale = d3.scaleSequential()
+         .interpolator(d3.interpolateBlues)
+         .domain([0, d3.max(data, (d: any) => d[config?.valueKey]) as number]);
+
+       const g = svg.append("g")
+         .attr("transform", `translate(${margin.left},${margin.top})`);
+
+       g.append("g")
+         .attr("transform", `translate(0, ${innerHeight})`)
+         .call(d3.axisBottom(x))
+         .select(".domain").remove();
+
+       g.append("g")
+         .call(d3.axisLeft(y))
+         .select(".domain").remove();
+
+       g.selectAll()
+         .data(data, (d: any) => d[config?.xAxisKey]+':'+d[config?.yAxisKey])
+         .join("rect")
+         .attr("x", (d: any) => x(d[config?.xAxisKey]) || 0)
+         .attr("y", (d: any) => y(d[config?.yAxisKey]) || 0)
+         .attr("width", x.bandwidth())
+         .attr("height", y.bandwidth())
+         .style("fill", (d: any) => colorScale(d[config?.valueKey]))
+         .append("title")
+         .text((d: any) => `${d[config?.xAxisKey]} - ${d[config?.yAxisKey]}: ${d[config?.valueKey]}`);
+    }
+  }, [codeString]);
+
+  try {
+    const configData = JSON.parse(codeString);
+    return (
+      <div className="my-6 rounded-[2.5rem] bg-white border border-zinc-200/50 p-6 shadow-sm w-full h-[450px]">
+        <div className="flex items-center justify-between border-b border-zinc-100 pb-3 mb-6">
+          <span className="font-mono text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]">
+            Data Visualization ({configData.type})
+          </span>
+        </div>
+        <div className="w-full h-[350px]" ref={containerRef} />
+      </div>
+    );
+  } catch (e: any) {
+      return (
+        <div className="my-6 p-4 rounded-xl bg-red-50 text-red-600 border border-red-100 font-mono text-xs">
+          Failed to render D3 chart: {e.message}
+        </div>
+      );
+  }
+}
+
+
+function CollaborativeEditor({ artifact }: { artifact: { id: string, content: string } }) {
+  const [localContent, setLocalContent] = useState(artifact.content);
+  
+  useEffect(() => {
+    setLocalContent(artifact.content);
+  }, [artifact.content]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newVal = e.target.value;
+    setLocalContent(newVal);
+  };
+
+  const handleBlur = async () => {
+    if (localContent !== artifact.content) {
+      try {
+        await updateDoc(doc(db, "artifacts", artifact.id), { content: localContent, fetchedAt: serverTimestamp() });
+      } catch (err) {
+        console.error("Failed to update artifact", err);
+      }
+    }
+  };
+
+  return (
+    <div className="flex w-full h-full gap-4">
+      <div className="flex-1 bg-zinc-900 shadow-sm ring-1 ring-zinc-900/5 relative rounded-xl overflow-hidden flex flex-col">
+        <div className="border-b border-zinc-800 px-4 py-3 flex items-center gap-2">
+          <Code2 size={14} className="text-zinc-500" />
+          <span className="font-mono text-[10px] uppercase text-zinc-400 tracking-widest">Real-time Editor</span>
+        </div>
+        <textarea
+           value={localContent}
+           onChange={handleChange}
+           onBlur={handleBlur}
+           className="w-full flex-1 p-6 font-mono text-[13px] bg-transparent text-zinc-300 border-none outline-none resize-none"
+           spellCheck={false}
+        />
+      </div>
+      <div className="flex-1 bg-white shadow-sm ring-1 ring-zinc-900/5 rounded-xl overflow-hidden">
+        <iframe
+          srcDoc={localContent}
+          className="w-full h-full border-none bg-white"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -2689,25 +3157,44 @@ function DeployDocumentBtn({ content }: { content: string }) {
   );
 }
 
+function parseAuraTags(text: string) {
+  const blocks = [];
+  const regex = /\[(AURA_APP|AURA_CHART)\]([\s\S]*?)\[\/\1\]/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      blocks.push({ type: 'markdown', content: text.substring(lastIndex, match.index) });
+    }
+    blocks.push({ type: match[1], content: match[2] });
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    blocks.push({ type: 'markdown', content: text.substring(lastIndex) });
+  }
+  return blocks.length > 0 ? blocks : [{ type: 'markdown', content: text }];
+}
+
 function ChatMessageItem({ m }: { m: ChatMessage }) {
   const isAI = m.role === "model";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
       className={cn(
-        "grid grid-cols-[1fr] gap-4 max-w-2xl",
+        "grid grid-cols-[1fr] gap-6 max-w-2xl pb-8 md:pb-12",
         !isAI && "ml-auto text-right",
       )}
     >
-      <div className="space-y-4">
-        <div className={cn("flex items-center gap-3", !isAI && "justify-end")}>
-          <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-400">
-            {isAI ? "Analysis" : "You"}
+      <div className="space-y-6">
+        <div className={cn("flex items-center gap-4", !isAI && "justify-end")}>
+          <span className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-zinc-400">
+            {isAI ? "Analysis" : "User"}
           </span>
           <span className="w-1 h-1 bg-zinc-200 rounded-full" />
-          <span className="text-[10px] font-mono text-zinc-300 uppercase tabular-nums">
+          <span className="text-[0.65rem] font-mono text-zinc-300 uppercase tabular-nums tracking-[0.2em]">
             {m.timestamp ? (
               new Date(m.timestamp?.toMillis ? m.timestamp.toMillis() : m.timestamp).toLocaleTimeString("en-US", {
                 hour: "2-digit",
@@ -2721,158 +3208,14 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
         </div>
         <div
           className={cn(
-            "text-base leading-relaxed tracking-tight",
+            "text-base leading-[1.8] tracking-tight",
             isAI
-              ? "text-zinc-700 prose prose-zinc max-w-none prose-sm font-light"
-              : "text-zinc-900 font-medium text-xl md:text-2xl tracking-tighter",
+              ? "text-zinc-700 prose prose-zinc max-w-none prose-sm font-light w-full"
+              : "text-zinc-900 font-medium text-xl md:text-2xl tracking-tighter w-full",
           )}
         >
           {isAI ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                p: ({ children }) => (
-                  <p className="mb-6 last:mb-0 text-zinc-700 leading-relaxed font-light">
-                    {children}
-                  </p>
-                ),
-                strong: ({ children }) => (
-                  <strong className="text-zinc-900 font-semibold">{children}</strong>
-                ),
-                table: ({ children }) => (
-                  <div className="w-full overflow-x-auto my-6 rounded-2xl border border-zinc-200 bg-zinc-50/50 backdrop-blur-sm">
-                    <table className="w-full text-left border-collapse text-sm">
-                      {children}
-                    </table>
-                  </div>
-                ),
-                thead: ({ children }) => (
-                  <thead className="bg-white/50 border-b border-zinc-200">
-                    {children}
-                  </thead>
-                ),
-                tbody: ({ children }) => (
-                  <tbody className="divide-y divide-zinc-200">
-                    {children}
-                  </tbody>
-                ),
-                tr: ({ children, isHeader, ...props }: any) => (
-                  <tr
-                    className="hover:bg-zinc-100/50 transition-colors"
-                    {...props}
-                  >
-                    {children}
-                  </tr>
-                ),
-                th: ({ children }) => (
-                  <th className="px-5 py-3 font-semibold text-[10px] text-zinc-500 uppercase tracking-widest border-r border-zinc-200 last:border-r-0">
-                    {children}
-                  </th>
-                ),
-                td: ({ children }) => {
-                  let numValue = NaN;
-
-                  // Attempt to parse string or array of strings into a number for heatmap coloring
-                  const parseNum = (val: any) => {
-                    if (typeof val === "string") {
-                      const numStr = val.replace(/[^0-9.-]/g, "");
-                      if (numStr && val.match(/^[-+]?[0-9]*\.?[0-9]+%?$/)) {
-                        return parseFloat(numStr);
-                      }
-                    }
-                    return NaN;
-                  };
-
-                  if (Array.isArray(children) && children.length === 1) {
-                    numValue = parseNum(children[0]);
-                  } else {
-                    numValue = parseNum(children);
-                  }
-
-                  let bgColor = "transparent";
-                  let textColor = "inherit";
-                  if (!isNaN(numValue)) {
-                    // Values > 0 get green, < 0 get red. This creates a really nice dynamic heatmap effect.
-                    if (numValue > 0) {
-                      const alpha = Math.min(
-                        Math.max(Math.abs(numValue) / 100, 0.05),
-                        0.3,
-                      );
-                      bgColor = `rgba(34, 197, 94, ${alpha})`;
-                      if (alpha > 0.2) textColor = "#064e3b";
-                    } else if (numValue < 0) {
-                      const alpha = Math.min(
-                        Math.max(Math.abs(numValue) / 100, 0.05),
-                        0.3,
-                      );
-                      bgColor = `rgba(239, 68, 68, ${alpha})`;
-                      if (alpha > 0.2) textColor = "#7f1d1d";
-                    }
-                  }
-
-                  return (
-                    <td
-                      className="px-5 py-3 font-mono text-[12px] tabular-nums whitespace-nowrap transition-colors border-r border-zinc-200 last:border-r-0"
-                      style={{
-                        backgroundColor: bgColor,
-                        color: textColor !== "inherit" ? textColor : undefined,
-                      }}
-                    >
-                      {children}
-                    </td>
-                  );
-                },
-                code: ({ inline, className, children, ...props }: any) => {
-                  const match = /language-(\w+)/.exec(className || "");
-
-                  const extractText = (node: any): string => {
-                    if (typeof node === "string") return node;
-                    if (typeof node === "number") return String(node);
-                    if (Array.isArray(node))
-                      return node.map(extractText).join("");
-                    if (
-                      node &&
-                      typeof node === "object" &&
-                      node.props &&
-                      node.props.children
-                    ) {
-                      return extractText(node.props.children);
-                    }
-                    return "";
-                  };
-
-                  const codeString = extractText(children).replace(/\n$/, "");
-
-                  if (!inline && match) {
-                    if (match[1] === "html") {
-                      return <HtmlArtifactBlock codeString={codeString} />;
-                    }
-
-                    return (
-                        <div className="my-6 rounded-2xl bg-[#F4F4F5] border border-zinc-200 p-4 font-mono text-[12px] overflow-x-auto text-zinc-900 shadow-sm">
-                            <div className="flex items-center justify-between border-b border-zinc-800/10 mb-2 pb-2">
-                                <span className="font-mono text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                                    {match[1]}
-                                </span>
-                            </div>
-                            <pre className="overflow-x-auto">
-                              <code className={className} {...props}>
-                                {children}
-                              </code>
-                            </pre>
-                        </div>
-                    );
-                  }
-                  return (
-                    <code className="text-[12px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-800 font-mono" {...props}>
-                      {children}
-                    </code>
-                  );
-                },
-              }}
-            >
-              {m.text}
-            </ReactMarkdown>
+            <ArtifactRenderer content={m.text || ""} />
           ) : (
             <div className="text-zinc-900 font-normal tracking-tight">
               {m.text}
@@ -2886,6 +3229,7 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
 
 function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () => void; oddsSource?: "sportsbook" | "prediction" }) {
   const getLogo = getEspnLogo;
+  
   const homePrice =
     odd.bookmakers?.[0]?.markets
       ?.find((m) => m.key === "h2h")
@@ -2905,32 +3249,47 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
   );
   const totalPoint =
     totalsInfo?.outcomes?.find((o) => o.name === "Over")?.point || "-";
+  const overPrice = totalsInfo?.outcomes?.find((o) => o.name === "Over")?.price || 0;
+  const underPrice = totalsInfo?.outcomes?.find((o) => o.name === "Under")?.price || 0;
+
+  const spreadsInfo = odd.bookmakers?.[0]?.markets?.find(
+    (m) => m.key === "spreads",
+  );
+  const awaySpread = spreadsInfo?.outcomes?.find(
+        (o) =>
+          o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name),
+      );
+  const homeSpread = spreadsInfo?.outcomes?.find(
+        (o) =>
+          o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name),
+      );
 
   return (
     <button
       onClick={onClick}
-      className="block relative outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-2 rounded-[2rem] w-full text-left"
+      className="block relative outline-none focus:ring-2 focus:ring-zinc-900 focus:ring-offset-2 rounded-[2.5rem] w-full text-left active:scale-[0.98] transition-all duration-200"
     >
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
-        whileHover={{ y: -4, transition: { duration: 0.3, ease: "easeOut" } }}
+        whileHover={{ y: -6, transition: { duration: 0.4, ease: [0.32, 0.72, 0, 1] } }}
+        whileTap={{ scale: 0.98 }}
         className={cn(
-          "bg-white border rounded-[2rem] overflow-hidden flex flex-col group transition-all duration-300 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.08)] cursor-pointer h-full border-zinc-200/60",
-          odd.status === "live" && "ring-1 ring-zinc-900/10 border-zinc-900/10",
+          "bg-white border rounded-[2.5rem] overflow-hidden flex flex-col group transition-all duration-500 shadow-precise hover:shadow-float cursor-pointer h-full border-zinc-200/50",
+          odd.status === "live" && "ring-1 ring-zinc-900/5 border-zinc-900/10",
         )}
       >
         {/* Atmosphere Header */}
-        <div className="bg-zinc-50/80 border-b border-zinc-100 px-6 py-4 flex items-center justify-between text-[10px] uppercase tracking-widest font-bold text-zinc-400">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-zinc-200/50 shadow-sm">
+        <div className="bg-zinc-50/50 border-b border-zinc-100/60 px-6 md:px-8 py-4 md:py-5 flex items-center justify-between text-[10px] uppercase tracking-widest font-bold text-zinc-500">
+          <div className="flex items-center gap-5">
+            <div className="flex items-center gap-2.5 px-3.5 py-1.5 bg-white rounded-full border border-zinc-100 shadow-sm">
               {odd.status === "live" ? (
-                 <span className="text-zinc-900 flex items-center gap-1.5 font-black uppercase tracking-widest">
+                 <span className="text-zinc-900 flex items-center gap-1.5 font-black uppercase tracking-widest animate-pulse">
                   {odd.inning_half && odd.inning ? `${odd.inning_half} ${odd.inning}` : "Live"}
                 </span>
               ) : (
-                <span className="text-zinc-600 font-mono">
+                <span className="text-zinc-800 font-mono tracking-tighter">
                   {(odd.status === 'final' || odd.status === 'finished') ? "FINAL" : 
                     new Date(odd.commence_time).toLocaleTimeString([], {
                     hour: "numeric",
@@ -2939,83 +3298,97 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2 group-hover:text-zinc-800 transition-colors">
-              <span className="truncate max-w-[140px] text-xs">{odd.venue}</span>
+            <div className="flex items-center gap-2 group-hover:text-zinc-700 transition-colors">
+              <span className="truncate max-w-[124px] text-xs font-medium tracking-tight text-zinc-600">{odd.venue}</span>
             </div>
           </div>
-          {odd.weather && odd.status !== "live" && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-md bg-zinc-50 border border-zinc-100 text-zinc-500">
-              <span className="text-[10px] font-medium">{odd.weather.display}</span>
-              {odd.weather.wind && (
-                <span className="text-[10px] font-mono border-l border-zinc-200 pl-2 text-zinc-400">{odd.weather.wind}</span>
-              )}
-            </div>
-          )}
+          <div className="flex items-center gap-3 ml-auto">
+            {!odd.situation_detail && (
+              <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-zinc-100/50 border border-zinc-100/80 text-zinc-600">
+                <span className="text-[9px] font-bold tracking-[0.1em]">{odd.tv_broadcast || "MLB.TV"}</span>
+              </div>
+            )}
+            {odd.weather && odd.status !== "live" && (
+              <div className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-zinc-100/50 border border-zinc-100/80 text-zinc-600">
+                <span className="text-[9px] font-bold tracking-[0.1em]">{odd.weather.display}</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Core Matchup */}
-        <div className="p-5 md:p-7 space-y-6 flex-1 bg-white">
+        <div className="p-6 md:p-10 space-y-6 md:space-y-8 flex-1 bg-white">
           <div className="relative">
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[60%] font-serif-italic text-sm text-zinc-300 pointer-events-none select-none z-10 flex flex-col items-center justify-center">
-              at
+              vs
             </div>
-            <div className="grid grid-cols-2 gap-8 md:gap-10">
+            <div className="grid grid-cols-2 gap-8 md:gap-14">
               {/* Away Team */}
-              <div className="flex flex-col items-center text-center space-y-4">
+              <div className="flex flex-col items-center text-center space-y-4 md:space-y-5">
                 <div className="relative group/logo">
-                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-110 blur-lg opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
+                  <div className="absolute inset-0 bg-zinc-50 rounded-full scale-125 blur-xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-700" />
                   <img
                     src={getLogo(odd.away_team)}
-                    className="relative w-16 h-16 md:w-20 md:h-20 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-2.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                    className="relative w-16 h-16 md:w-24 md:h-24 rounded-full shadow-[0_8px_32px_rgba(0,0,0,0.04)] p-2.5 md:p-3 bg-white border border-zinc-50 group-hover:scale-105 transition-transform duration-700 ease-[cubic-bezier(0.32,0.72,0,1)]"
                     alt={odd.away_team}
                   />
                   {odd.status === "live" &&
                     parseInt(odd.away_score || "0") >
                       parseInt(odd.home_score || "0") && (
-                      <div className="absolute top-0 right-0 w-3 h-3 bg-zinc-900 rounded-full border-[2px] border-white shadow-sm z-10" />
+                      <div className="absolute top-0 right-0 w-3.5 h-3.5 md:w-4 md:h-4 bg-zinc-900 rounded-full border-[2.5px] md:border-[3px] border-white shadow-md z-10" />
                     )}
                 </div>
                 <div>
-                  <h3 className="text-xl md:text-2xl serif font-medium text-zinc-900 tracking-tight mb-1.5">
-                    {odd.away_team.split(" ").pop()}
-                  </h3>
-                  <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex flex-col items-center">
+                    <h3 className="text-lg md:text-2xl font-semibold text-zinc-900 tracking-tight leading-tight">
+                      {odd?.away_team?.split?.(" ")?.pop?.() || "Away"}
+                    </h3>
+                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.2em] mt-0.5">{odd?.away_team?.split?.(" ")?.slice?.(0, -1)?.join?.(" ") || ""}</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5 mt-3 md:mt-4">
                     {odd.away_score && (
-                      <span className="text-2xl font-bold text-zinc-900 tracking-tighter block font-mono">
+                      <span className="text-2xl md:text-3xl font-bold text-zinc-900 tracking-tighter block font-mono">
                         {odd.away_score}
                       </span>
                     )}
-                    {awayPrice !== 0 && <PriceTag price={awayPrice} />}
+                    {odd.away_team_record && (
+                      <span className="text-[9px] font-bold text-zinc-500 font-mono tracking-widest bg-zinc-50 px-2 py-0.5 rounded-md border border-zinc-100">{odd.away_team_record}</span>
+                    )}
                   </div>
                 </div>
               </div>
 
               {/* Home Team */}
-              <div className="flex flex-col items-center text-center space-y-4">
+              <div className="flex flex-col items-center text-center space-y-4 md:space-y-5">
                 <div className="relative group/logo">
-                  <div className="absolute inset-0 bg-zinc-100/50 rounded-full scale-110 blur-lg opacity-0 group-hover/logo:opacity-100 transition-opacity duration-500" />
+                  <div className="absolute inset-0 bg-zinc-50 rounded-full scale-125 blur-xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-700" />
                   <img
                     src={getLogo(odd.home_team)}
-                    className="relative w-16 h-16 md:w-20 md:h-20 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.06)] p-2.5 bg-white border border-zinc-100 group-hover:scale-105 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
+                    className="relative w-16 h-16 md:w-24 md:h-24 rounded-full shadow-[0_8px_32px_rgba(0,0,0,0.04)] p-2.5 md:p-3 bg-white border border-zinc-50 group-hover:scale-105 transition-transform duration-700 ease-[cubic-bezier(0.32,0.72,0,1)]"
                     alt={odd.home_team}
                   />
                   {odd.status === "live" &&
                     parseInt(odd.home_score || "0") >
                       parseInt(odd.away_score || "0") && (
-                      <div className="absolute top-0 right-0 w-3 h-3 bg-zinc-900 rounded-full border-[2px] border-white shadow-sm z-10" />
+                      <div className="absolute top-0 right-0 w-3.5 h-3.5 md:w-4 md:h-4 bg-zinc-900 rounded-full border-[2.5px] md:border-[3px] border-white shadow-md z-10" />
                     )}
                 </div>
                 <div>
-                  <h3 className="text-xl md:text-2xl serif font-medium text-zinc-900 tracking-tight mb-1.5">
-                    {odd.home_team.split(" ").pop()}
-                  </h3>
-                  <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex flex-col items-center">
+                    <h3 className="text-lg md:text-2xl font-semibold text-zinc-900 tracking-tight leading-tight">
+                      {odd?.home_team?.split?.(" ")?.pop?.() || "Home"}
+                    </h3>
+                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.2em] mt-0.5">{odd?.home_team?.split?.(" ")?.slice?.(0, -1)?.join?.(" ") || ""}</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5 mt-3 md:mt-4">
                     {odd.home_score && (
-                      <span className="text-2xl font-bold text-zinc-900 tracking-tighter block font-mono">
+                      <span className="text-2xl md:text-3xl font-bold text-zinc-900 tracking-tighter block font-mono">
                         {odd.home_score}
                       </span>
                     )}
-                    {homePrice !== 0 && <PriceTag price={homePrice} />}
+                    {odd.home_team_record && (
+                      <span className="text-[9px] font-bold text-zinc-500 font-mono tracking-widest bg-zinc-50 px-2 py-0.5 rounded-md border border-zinc-100">{odd.home_team_record}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -3023,7 +3396,7 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
           </div>
 
           {/* Matchup Visual / Context */}
-          {odd.status === "live" && odd.situation_detail ? (
+          {odd.status === "live" && odd.situation_detail && (
             <div className="flex items-center justify-between px-6 py-5 bg-white rounded-[1.5rem] border border-zinc-100 shadow-[0_2px_12px_rgba(0,0,0,0.01)] overflow-hidden relative">
                 {/* Background Accent */}
                 <div className="absolute inset-0 bg-gradient-to-br from-white via-zinc-50/30 to-zinc-100/20 pointer-events-none" />
@@ -3068,6 +3441,25 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
                       ))}
                     </div>
                   </div>
+                  {(odd.situation_detail?.lastPitch || odd.situation_detail?.lastPlay) && (
+                    <div className="mt-2 pt-2 border-t border-zinc-100 flex flex-col gap-1">
+                      {odd.situation_detail.lastPitch && (
+                        <div className="flex items-center gap-2">
+                           <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-900 bg-zinc-100 px-1.5 py-0.5 rounded">
+                             {odd.situation_detail.lastPitch.speed ? Math.round(odd.situation_detail.lastPitch.speed) + " MPH" : "PITCH"}
+                           </span>
+                           <span className="text-xs font-mono text-zinc-500">
+                             {odd.situation_detail.lastPitch.type} {odd.situation_detail.lastPitch.call ? `· ${odd.situation_detail.lastPitch.call}` : ""}
+                           </span>
+                        </div>
+                      )}
+                      {odd.situation_detail.lastPlay && (
+                        <p className="text-xs text-zinc-600 font-serif leading-tight">
+                          {odd.situation_detail.lastPlay}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="relative w-24 h-24 transform rotate-45 origin-center bg-white border border-zinc-200/60 rounded shadow-[inset_0_2px_6px_rgba(0,0,0,0.03)] overflow-hidden">
@@ -3106,91 +3498,132 @@ function OddsCard({ odd, onClick, oddsSource }: { odd: SportOdds; onClick?: () =
                   </div>
                 </div>
             </div>
-          ) : (
-            <div className="bg-zinc-50 rounded-[1.25rem] p-4 border border-zinc-200/50">
-               <div className="text-[9px] uppercase font-bold text-zinc-400 tracking-widest mb-2">
-                  Park / Weather
-               </div>
-               <p className="text-sm text-zinc-600 leading-relaxed font-serif line-clamp-2">
-                  {odd.weather_vector ? (
-                      <span className="text-zinc-900 font-medium">{odd.weather_vector.stadiumName} · {odd.weather_vector.temp}°F · {odd.weather_vector.description}</span>
-                   ) : (
-                      <>Playing at <span className="text-zinc-900 font-medium">{odd.location}</span>. {odd.venue_factor}{' '}
-                      {odd.weather ? ` ${odd.weather.display}${odd.weather.wind ? ` with ${odd.weather.wind}` : ''}.` : ''}</>
-                   )}
-                </p>
-            </div>
           )}
+
+          {/* Park / Weather - Always shown on the front of the card */}
+          <div className="bg-zinc-50 rounded-[1.25rem] p-4 border border-zinc-200/50 flex flex-col justify-center min-h-[72px]">
+             <div className="text-[9px] uppercase font-bold text-zinc-400 tracking-widest mb-1.5">
+                Park / Weather
+             </div>
+             <p className="text-sm text-zinc-600 leading-snug font-serif line-clamp-2">
+                {odd.weather_vector ? (
+                    <span className="text-zinc-900 font-medium">{odd.weather_vector.stadiumName} · {odd.weather_vector.temp}°F · {odd.weather_vector.description}</span>
+                 ) : (
+                    <>Playing at <span className="text-zinc-900 font-medium">{odd.location}</span>. {odd.venue_factor}{' '}
+                    {odd.weather ? ` ${odd.weather.display}${odd.weather.wind ? ` with ${odd.weather.wind}` : ''}.` : ''}</>
+                 )}
+              </p>
+          </div>
 
           {/* Institutional Data Row */}
-          {!odd.situation_detail && (
-            <div className={cn(
-              "grid gap-3 bg-zinc-50/50 p-2 rounded-3xl border border-zinc-200/40",
-              totalPoint !== "-" ? "grid-cols-3" : "grid-cols-2"
-            )}>
-                  {totalPoint !== "-" && (
-                    <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
+          <div className="grid gap-2 md:gap-4 bg-zinc-100/30 p-2 rounded-[2rem] md:rounded-[2.25rem] border border-zinc-200/30 grid-cols-3">
+              
+              {/* Moneyline */}
+              <div className="bg-white rounded-[1.75rem] md:rounded-[2rem] p-3 md:p-4 text-center border border-zinc-100/80 shadow-precise flex flex-col justify-center gap-2 md:gap-2.5 transition-shadow">
+                <span className="block text-[7px] md:text-[8px] uppercase font-bold text-zinc-400 tracking-[0.2em] md:tracking-[0.25em] w-full text-center">
+                  ML
+                </span>
+                <div className="flex flex-col gap-1 w-full flex-1 justify-center">
+                  <div className="flex items-center justify-between w-full text-[9px] md:text-[11px] font-mono">
+                    <span className="text-zinc-500 truncate mr-1 font-bold tracking-tight">{odd?.away_team?.split?.(" ")?.pop?.()?.substring?.(0,3)?.toUpperCase() || "AWY"}</span>
+                    <div className="flex-shrink-0 scale-75 md:scale-90 origin-right"><PriceTag price={awayPrice} /></div>
+                  </div>
+                  <div className="flex items-center justify-between w-full text-[9px] md:text-[11px] font-mono">
+                    <span className="text-zinc-500 truncate mr-1 font-bold tracking-tight">{odd?.home_team?.split?.(" ")?.pop?.()?.substring?.(0,3)?.toUpperCase() || "HME"}</span>
+                    <div className="flex-shrink-0 scale-75 md:scale-90 origin-right"><PriceTag price={homePrice} /></div>
+                  </div>
+                </div>
+              </div>
 
-                    <span className="block text-[9px] uppercase font-bold text-zinc-400 tracking-[0.2em] mb-2">
-                      Totals
-                    </span>
-                    <span className="text-sm font-mono font-medium text-zinc-800">
-                      O/U {totalPoint}
-                    </span>
+              {/* Over/Under */}
+              <div className="bg-white rounded-[1.75rem] md:rounded-[2rem] p-3 md:p-4 text-center border border-zinc-100/80 shadow-precise flex flex-col justify-center gap-2 md:gap-2.5 transition-shadow">
+                <span className="block text-[7px] md:text-[8px] uppercase font-bold text-zinc-400 tracking-[0.2em] md:tracking-[0.25em] w-full text-center">
+                  Total
+                </span>
+                {totalPoint !== "-" ? (
+                  <div className="flex flex-col gap-0.5 w-full flex-1 justify-center">
+                    <div className="flex items-center justify-between w-full text-[9px] md:text-[11px] font-mono">
+                      <span className="text-zinc-400 font-bold tracking-tighter">O {totalPoint}</span>
+                      <span className="text-zinc-900 font-black">{overPrice > 0 ? `+${overPrice}` : overPrice}</span>
+                    </div>
+                    <div className="flex items-center justify-between w-full text-[9px] md:text-[11px] font-mono">
+                      <span className="text-zinc-400 font-bold tracking-tighter">U {totalPoint}</span>
+                      <span className="text-zinc-900 font-black">{underPrice > 0 ? `+${underPrice}` : underPrice}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center flex-1">
+                    <span className="text-[10px] font-mono font-medium text-zinc-300">N/A</span>
                   </div>
                 )}
-                <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
-                  <span className="block text-[9px] uppercase font-bold text-zinc-400 tracking-[0.2em] mb-2">
-                    Series
-                  </span>
-                  <span className="text-[12px] font-medium text-zinc-800 leading-tight block whitespace-break-spaces">
-                    {odd.series_history || "No Data"}
-                  </span>
-                </div>
-                <div className="bg-white rounded-[1.25rem] p-5 text-center border border-zinc-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-center items-center group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-shadow">
-                  <span className="block text-[9px] uppercase font-bold text-zinc-400 tracking-[0.2em] mb-2">
-                    Bullpen
-                  </span>
-                  <div className={cn(
-                    "flex items-center justify-center text-xs font-bold text-center",
-                    odd.bullpen_rating === "ELITE" ? "text-blue-600" : odd.bullpen_rating === "STUNTED" ? "text-red-500" : "text-zinc-600"
-                  )}>
-                    {odd.bullpen_rating}
+              </div>
+
+              {/* Runline */}
+              <div className="bg-white rounded-[1.75rem] md:rounded-[2rem] p-3 md:p-4 text-center border border-zinc-100/80 shadow-precise flex flex-col justify-center gap-2 md:gap-2.5 transition-shadow">
+                <span className="block text-[7px] md:text-[8px] uppercase font-bold text-zinc-400 tracking-[0.2em] md:tracking-[0.25em] w-full text-center">
+                  Spread
+                </span>
+                {awaySpread && homeSpread ? (
+                  <div className="flex flex-col gap-0.5 w-full flex-1 justify-center">
+                    <div className="flex items-center justify-between w-full text-zinc-900 font-mono whitespace-nowrap">
+                      <span className="font-bold tracking-tighter text-[9px] md:text-[11px]">{awaySpread.point > 0 ? `+${awaySpread.point}` : awaySpread.point}</span>
+                      <span className="text-[7px] md:text-[8px] font-black text-zinc-400">({awaySpread.price > 0 ? `+${awaySpread.price}` : (awaySpread.price || awayPrice)})</span>
+                    </div>
+                    <div className="flex items-center justify-between w-full text-zinc-900 font-mono whitespace-nowrap">
+                      <span className="font-bold tracking-tighter text-[9px] md:text-[11px]">{homeSpread.point > 0 ? `+${homeSpread.point}` : homeSpread.point}</span>
+                      <span className="text-[7px] md:text-[8px] font-black text-zinc-400">({homeSpread.price > 0 ? `+${homeSpread.price}` : (homeSpread.price || homePrice)})</span>
+                    </div>
                   </div>
-                </div>
-            </div>
-          )}
+                ) : (
+                  <div className="flex items-center justify-center flex-1">
+                    <span className="text-[10px] font-mono font-medium text-zinc-300">N/A</span>
+                  </div>
+                )}
+              </div>
+          </div>
 
           {/* Pitching Narrative */}
           <div className="pt-2">
-            <div className="grid grid-cols-2 gap-12 relative">
-              <div className="absolute left-1/2 top-0 bottom-0 w-px bg-zinc-100/80 -translate-x-1/2" />
-              <PitcherDisplay
-                teamFull={odd.away_team}
-                name={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.name : odd.away_pitcher}
-                headshot={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.headshot : odd.away_pitcher_headshot}
-                record={odd.status === "live" && odd.away_live_pitcher ? getPitcherLiveStats(odd.away_live_pitcher) : odd.away_pitcher_record}
-                small
-              />
-              <PitcherDisplay
-                teamFull={odd.home_team}
-                name={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.name : odd.home_pitcher}
-                headshot={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.headshot : odd.home_pitcher_headshot}
-                record={odd.status === "live" && odd.home_live_pitcher ? getPitcherLiveStats(odd.home_live_pitcher) : odd.home_pitcher_record}
-                alignRight
-                small
-              />
+            <div className="grid grid-cols-2 gap-4 relative px-2">
+              <div className="absolute left-1/2 top-1 bottom-1 w-px bg-zinc-100/60 -translate-x-1/2" />
+              {(odd.status === "live" && odd.situation_detail?.pitcher && odd.situation_detail?.batter) ? (
+                <>
+                  <PitcherDisplay
+                    teamFull="Pitching"
+                    name={odd.situation_detail.pitcher.name || "TBA"}
+                    headshot={odd.situation_detail.pitcher.headshot}
+                    record={getPitcherLiveStats(odd.situation_detail.pitcher, odd)}
+                    small
+                  />
+                  <PitcherDisplay
+                    teamFull="Batting"
+                    name={odd.situation_detail.batter.name || "TBA"}
+                    headshot={odd.situation_detail.batter.headshot}
+                    record={odd.situation_detail.batter.summary || "Hitting"}
+                    alignRight
+                    small
+                  />
+                </>
+              ) : (
+                <>
+                  <PitcherDisplay
+                    teamFull={odd.away_team}
+                    name={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.name : odd.away_pitcher}
+                    headshot={odd.status === "live" && odd.away_live_pitcher ? odd.away_live_pitcher.headshot : odd.away_pitcher_headshot}
+                    record={odd.status === "live" && odd.away_live_pitcher ? getPitcherLiveStats(odd.away_live_pitcher) : odd.away_pitcher_record}
+                    small
+                  />
+                  <PitcherDisplay
+                    teamFull={odd.home_team}
+                    name={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.name : odd.home_pitcher}
+                    headshot={odd.status === "live" && odd.home_live_pitcher ? odd.home_live_pitcher.headshot : odd.home_pitcher_headshot}
+                    record={odd.status === "live" && odd.home_live_pitcher ? getPitcherLiveStats(odd.home_live_pitcher) : odd.home_pitcher_record}
+                    alignRight
+                    small
+                  />
+                </>
+              )}
             </div>
-          </div>
-        </div>
-
-        {/* Narrative Pulse Footer */}
-        <div className="py-4 px-6 bg-zinc-900 text-white font-mono text-[10px] flex items-center justify-center text-center">
-          <div className="flex-1 leading-relaxed opacity-95 overflow-hidden line-clamp-2">
-            <span className="text-zinc-400 font-bold mr-2 uppercase tracking-[0.2em]">
-              TREND:
-            </span>
-            {odd.trend_story}
           </div>
         </div>
       </motion.div>
@@ -3202,34 +3635,45 @@ function MobileNavIcon({
   active,
   onClick,
   label,
+  icon,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  icon: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center justify-center transition-all duration-500 py-1 flex-1 md:flex-none outline-none relative group md:px-4",
+        "flex flex-col items-center justify-center transition-all duration-300 py-1 flex-1 relative outline-none",
         active ? "text-ink" : "text-zinc-400"
       )}
     >
-      <div className="flex flex-col items-center">
+      <motion.div 
+        whileTap={{ scale: 0.9 }}
+        className="flex flex-col items-center gap-1"
+      >
+        <div className={cn(
+          "transition-all duration-300",
+          active ? "scale-110" : "scale-100"
+        )}>
+          {icon}
+        </div>
         <span className={cn(
-          "text-[10px] uppercase font-black tracking-[0.3em] transition-all duration-500 ease-out",
-          active ? "opacity-100 scale-110" : "opacity-30 scale-100"
+          "text-[9px] uppercase font-black tracking-wider transition-all duration-300",
+          active ? "opacity-100" : "opacity-65"
         )}>
           {label}
         </span>
         {active && (
           <motion.div
             layoutId="mobile-nav-indicator"
-            className="absolute -bottom-2 w-1 h-1 bg-brand rounded-full"
+            className="absolute -bottom-1 w-1 h-1 bg-zinc-900 rounded-full"
             transition={{ type: "spring", stiffness: 400, damping: 30 }}
           />
         )}
-      </div>
+      </motion.div>
     </button>
   );
 }
@@ -3248,10 +3692,10 @@ function PriceTag({ price }: { price: number | string }) {
 
   return (
     <div className={cn(
-      "font-mono font-bold text-[10px] uppercase tracking-tight ring-1 ring-inset px-2.5 py-1 rounded shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all",
+      "font-mono text-[10px] font-bold px-3 py-1 rounded-full transition-all border shadow-sm",
       isPositive 
-        ? "bg-emerald-50 text-emerald-700 ring-emerald-600/10" 
-        : "bg-white text-zinc-600 ring-zinc-200"
+        ? "bg-zinc-900 text-white border-zinc-950" 
+        : "bg-white text-zinc-900 border-zinc-200"
     )}>
       {displayPrice}
     </div>
@@ -3262,6 +3706,20 @@ function GameDetailView({ odds, oddsSource }: { odds: SportOdds[], oddsSource?: 
   const { gameId } = useParams();
   const odd = odds.find((o) => o.id === gameId);
   const navigate = useNavigate();
+
+  if (!odd) {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-400">
+        <p>Game not found.</p>
+        <button
+          className="mt-4 text-brand hover:underline"
+          onClick={() => navigate("/")}
+        >
+          Back to Board
+        </button>
+      </div>
+    );
+  }
 
   const homePrice =
     odd?.bookmakers?.[0]?.markets
@@ -3283,78 +3741,66 @@ function GameDetailView({ odds, oddsSource }: { odds: SportOdds[], oddsSource?: 
   const totalPoint =
     totalsInfo?.outcomes?.find((o) => o.name === "Over")?.point || "-";
 
-  if (!odd) {
-    return (
-      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-400">
-        <p>Game not found.</p>
-        <button
-          className="mt-4 text-brand hover:underline"
-          onClick={() => navigate("/")}
-        >
-          Back to Board
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar p-6 md:px-12 md:pb-12 md:pt-16 lg:px-16 lg:pt-20 lg:pb-16 bg-white">
-      <div className="max-w-4xl mx-auto w-full">
-        <button
-          className="text-[10px] items-center flex gap-2 font-bold uppercase tracking-widest text-zinc-400 hover:text-ink mb-8 md:mb-12 transition-colors"
-          onClick={() => navigate("/")}
-        >
-          <ChevronRight size={14} className="rotate-180" /> Back to Daily Board
-        </button>
-
-        <h1 className="text-3xl md:text-5xl font-medium serif-italic text-ink mb-6">
-          {odd.away_team} @ {odd.home_team}
-        </h1>
-
-        <div className="flex flex-wrap items-center gap-4 mb-8 md:mb-12 relative">
-          <span
-            className={cn(
-              "px-4 py-1 rounded-full text-[10px] md:text-xs font-bold uppercase tracking-widest whitespace-nowrap",
-              odd.status === "live"
-                ? "bg-brand text-white animate-pulse"
-                : "bg-zinc-100 text-zinc-500",
-            )}
+    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar bg-white pb-[calc(100px+env(safe-area-inset-bottom,1.5rem))]">
+      <div className="max-w-4xl mx-auto w-full px-5 md:px-0">
+        <div className="pt-4 md:pt-12 mb-6 md:mb-12">
+          <button
+            className="group flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-ink transition-all p-2 -ml-2"
+            onClick={() => navigate("/")}
           >
-            {odd.status === "live"
-              ? "LIVE"
-              : (odd.status === "final" || odd.status === "finished")
-                ? "FINAL"
-                : "UPCOMING"}
-          </span>
-          <span className="text-[11px] md:text-sm font-mono text-zinc-500">
-            {new Date(odd.commence_time).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} •{" "}
-            {odd.venue || "TBA"}
-          </span>
+            <ChevronLeft size={16} className="transition-transform group-active:-translate-x-1" /> Back to Slate
+          </button>
+        </div>
+
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-3">
+             <span
+              className={cn(
+                "px-3 py-0.5 rounded text-[9px] font-black uppercase tracking-widest whitespace-nowrap",
+                odd.status === "live"
+                  ? "bg-red-600 text-white animate-pulse"
+                  : "bg-zinc-100 text-zinc-500",
+              )}
+            >
+              {odd.status === "live"
+                ? "LIVE"
+                : (odd.status === "final" || odd.status === "finished")
+                  ? "FINAL"
+                  : "UPCOMING"}
+            </span>
+            <span className="text-zinc-400 text-[10px] font-mono uppercase tracking-widest ml-auto">
+              {new Date(odd.commence_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+          <h1 className="text-2xl md:text-5xl font-medium serif-italic text-ink leading-tight">
+            {odd.away_team} <span className="text-zinc-300 font-serif not-italic mx-1">@</span> {odd.home_team}
+          </h1>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 border-t border-zinc-100 pt-8 md:pt-12">
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-4 md:gap-6">
             <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest">
               Away Side
             </span>
             <div className="flex items-center gap-4">
               <img
                 src={getEspnLogo(odd.away_team)}
-                className="w-12 h-12 md:w-16 md:h-16 rounded-full border border-zinc-100"
+                className="w-12 h-12 md:w-16 md:h-16 rounded-full border border-zinc-50 shadow-sm"
                 alt=""
               />
               <div>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 md:gap-3">
                   <h3 className="text-xl md:text-2xl serif text-ink">{odd.away_team}</h3>
                   {awayPrice !== 0 && <PriceTag price={awayPrice} />}
                 </div>
                 <p className="font-mono text-zinc-500 mt-1 text-xs">
-                  {odd.away_score ? `Score: ${odd.away_score}` : ""}
+                  {odd.away_score ? `Score: ${odd.away_score}` : "No score yet"}
                 </p>
               </div>
             </div>
           </div>
-          <div className="flex flex-col gap-6 text-left md:text-right md:items-end">
+          <div className="flex flex-col gap-4 md:gap-6 text-left md:text-right md:items-end">
             <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest">
               Home Side
             </span>
@@ -3365,12 +3811,12 @@ function GameDetailView({ odds, oddsSource }: { odds: SportOdds[], oddsSource?: 
                 alt=""
               />
               <div className="flex flex-col md:items-end">
-                <div className="flex flex-wrap items-center gap-3 md:flex-row-reverse">
+                <div className="flex flex-wrap items-center gap-2 md:gap-3 md:flex-row-reverse">
                   <h3 className="text-xl md:text-2xl serif text-ink">{odd.home_team}</h3>
                   {homePrice !== 0 && <PriceTag price={homePrice} />}
                 </div>
                 <p className="font-mono text-zinc-500 mt-1 text-xs">
-                  {odd.home_score ? `Score: ${odd.home_score}` : ""}
+                  {odd.home_score ? `Score: ${odd.home_score}` : "No score yet"}
                 </p>
               </div>
             </div>
@@ -3421,60 +3867,111 @@ function GameDetailView({ odds, oddsSource }: { odds: SportOdds[], oddsSource?: 
             </h3>
 
             <div className="grid grid-cols-2 gap-8 items-start">
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-bold text-zinc-400 uppercase">
-                  {odd.away_team.split(" ").pop()} (A)
-                </span>
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
-                    <img
-                      src={
-                        ((odd.status === "live" && odd.away_live_pitcher?.headshot) 
-                          ? odd.away_live_pitcher.headshot 
-                          : odd.away_pitcher_headshot) ||
-                        `https://api.dicebear.com/7.x/initials/svg?seed=${odd.away_pitcher || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`
-                      }
-                      alt={(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
-                      className="w-full h-full object-cover scale-110"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-serif text-ink tracking-tight">
-                      {(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
+              {(odd.status === "live" && odd.situation_detail?.pitcher && odd.situation_detail?.batter) ? (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <span className="text-sm font-bold text-zinc-400 uppercase">
+                      Pitching
                     </span>
-                    <span className="font-mono text-sm text-zinc-500">
-                      {(odd.status === "live" && odd.away_live_pitcher) ? getPitcherLiveStats(odd.away_live_pitcher) : (odd.away_pitcher_record || "No record data")}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                        <img
+                          src={odd.situation_detail.pitcher.headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.situation_detail.pitcher.name || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`}
+                          alt={odd.situation_detail.pitcher.name || "TBA"}
+                          className="w-full h-full object-cover scale-110"
+                        />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-2xl font-serif text-ink tracking-tight">
+                          {odd.situation_detail.pitcher.name || "TBA"}
+                        </span>
+                        <span className="font-mono text-sm text-zinc-500">
+                          {getPitcherLiveStats(odd.situation_detail.pitcher, odd)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div className="flex flex-col gap-2 text-right items-end">
-                <span className="text-sm font-bold text-zinc-400 uppercase">
-                  {odd.home_team.split(" ").pop()} (H)
-                </span>
-                <div className="flex items-center gap-3 flex-row-reverse">
-                  <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
-                    <img
-                      src={
-                        ((odd.status === "live" && odd.home_live_pitcher?.headshot) 
-                          ? odd.home_live_pitcher.headshot 
-                          : odd.home_pitcher_headshot) ||
-                        `https://api.dicebear.com/7.x/initials/svg?seed=${odd.home_pitcher || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`
-                      }
-                      alt={(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
-                      className="w-full h-full object-cover scale-110"
-                    />
-                  </div>
-                  <div className="flex flex-col text-right">
-                    <span className="text-2xl font-serif text-ink tracking-tight">
-                      {(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
+                  <div className="flex flex-col gap-2 text-right items-end">
+                    <span className="text-sm font-bold text-zinc-400 uppercase">
+                      Batting
                     </span>
-                    <span className="font-mono text-sm text-zinc-500">
-                      {(odd.status === "live" && odd.home_live_pitcher) ? getPitcherLiveStats(odd.home_live_pitcher) : (odd.home_pitcher_record || "No record data")}
-                    </span>
+                    <div className="flex items-center gap-3 flex-row-reverse">
+                      <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                        <img
+                          src={odd.situation_detail.batter.headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.situation_detail.batter.name || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`}
+                          alt={odd.situation_detail.batter.name || "TBA"}
+                          className="w-full h-full object-cover scale-110"
+                        />
+                      </div>
+                      <div className="flex flex-col text-right">
+                        <span className="text-2xl font-serif text-ink tracking-tight">
+                          {odd.situation_detail.batter.name || "TBA"}
+                        </span>
+                        <span className="font-mono text-sm text-zinc-500">
+                          {odd.situation_detail.batter.summary || "Hitting"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <span className="text-sm font-bold text-zinc-400 uppercase">
+                      {odd.away_team.split(" ").pop()} (A)
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                        <img
+                          src={
+                            ((odd.status === "live" && odd.away_live_pitcher?.headshot) 
+                              ? odd.away_live_pitcher.headshot 
+                              : odd.away_pitcher_headshot) ||
+                            `https://api.dicebear.com/7.x/initials/svg?seed=${odd.away_pitcher || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`
+                          }
+                          alt={(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
+                          className="w-full h-full object-cover scale-110"
+                        />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-2xl font-serif text-ink tracking-tight">
+                          {(odd.status === "live" && odd.away_live_pitcher?.name) ? odd.away_live_pitcher.name : odd.away_pitcher || "TBA"}
+                        </span>
+                        <span className="font-mono text-sm text-zinc-500">
+                          {(odd.status === "live" && odd.away_live_pitcher) ? getPitcherLiveStats(odd.away_live_pitcher) : (odd.away_pitcher_record || "No record data")}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 text-right items-end">
+                    <span className="text-sm font-bold text-zinc-400 uppercase">
+                      {odd.home_team.split(" ").pop()} (H)
+                    </span>
+                    <div className="flex items-center gap-3 flex-row-reverse">
+                      <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                        <img
+                          src={
+                            ((odd.status === "live" && odd.home_live_pitcher?.headshot) 
+                              ? odd.home_live_pitcher.headshot 
+                              : odd.home_pitcher_headshot) ||
+                            `https://api.dicebear.com/7.x/initials/svg?seed=${odd.home_pitcher || "TBA"}&backgroundColor=e4e4e7&textColor=52525b`
+                          }
+                          alt={(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
+                          className="w-full h-full object-cover scale-110"
+                        />
+                      </div>
+                      <div className="flex flex-col text-right">
+                        <span className="text-2xl font-serif text-ink tracking-tight">
+                          {(odd.status === "live" && odd.home_live_pitcher?.name) ? odd.home_live_pitcher.name : odd.home_pitcher || "TBA"}
+                        </span>
+                        <span className="font-mono text-sm text-zinc-500">
+                          {(odd.status === "live" && odd.home_live_pitcher) ? getPitcherLiveStats(odd.home_live_pitcher) : (odd.home_pitcher_record || "No record data")}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
