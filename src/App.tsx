@@ -1516,7 +1516,7 @@ function AuthLanding({ onLogin }: { onLogin: () => void }) {
            <span className="serif-italic font-medium text-brand">BASELINE</span>
         </h1>
         <p className="text-lg sm:text-xl text-zinc-600 max-w-xl mx-auto leading-relaxed mb-16 font-medium">
-           Institutional-grade statistical analysis and direct market board anchors. No fluff, just the tape.
+           Live odds, stats, and trends.
         </p>
         <button 
           onClick={onLogin}

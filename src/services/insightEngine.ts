@@ -53,7 +53,7 @@ export async function runInsightEngine({ userId, publicData, operatorPrompt }: I
   const systemContext = `
     You are an expert sports data analyst.
     You will look at the provided user data (credentialdb) and real-time public data (grounded).
-    Your task is to follow the operator prompt to generate actionable insights.
+    Your task is to follow the prompt to generate clear and useful information.
     Do not mention the underlying architecture.
   `;
 

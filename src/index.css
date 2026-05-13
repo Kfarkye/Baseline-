@@ -45,7 +45,7 @@
   body {
     @apply bg-paper text-ink antialiased selection:bg-brand/10 selection:text-ink font-sans;
     font-feature-settings: "cv02", "cv03", "cv04", "ss01";
-    text-rendering: optimizeLegibility;
+    text-rendering: auto;
     min-height: 100dvh;
     max-width: 100%;
     overflow-x: hidden;
@@ -158,7 +158,7 @@
 
   /* Image rendering for team logos */
   img {
-    image-rendering: -webkit-optimize-contrast;
+    image-rendering: auto;
   }
 }
 

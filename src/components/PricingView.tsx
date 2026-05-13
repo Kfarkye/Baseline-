@@ -8,7 +8,7 @@ export function PricingView({ user, onSubscribe }: { user: any, onSubscribe: (ti
       <div className="text-center mb-8 sm:mb-10">
         <h1 className="text-4xl sm:text-6xl serif text-ink mb-4">Unfair Advantage</h1>
         <p className="text-base text-zinc-700 font-mono max-w-xl mx-auto leading-relaxed">
-          Institutional-grade infrastructure meets AI intelligence. Choose your edge.
+          Real-time sports market data and AI insights. Choose your edge.
         </p>
       </div>
 
