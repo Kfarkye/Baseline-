@@ -144,13 +144,13 @@ function sanitizeConsumerSportsText(text: string): string {
     sanitized = sanitized.replace(pattern, "");
   }
   sanitized = sanitized
-    .replace(/\bhttps?:\/\/(?:site\.api\.espn\.com|localhost|127\.0\.0\.1)[^\s)\]]*/gi, "ESPN checked")
-    .replace(/\bhttps?:\/\/[^\s)\]]*\/(?:api|mcp)[^\s)\]]*/gi, "Web checked")
-    .replace(/\bPASS\s*-\s*data unavailable\b/gi, "ESPN checked. Market line not found yet.")
+    .replace(/\bhttps?:\/\/(?:site\.api\.espn\.com|localhost|127\.0\.0\.1)[^\s)\]]*/gi, "")
+    .replace(/\bhttps?:\/\/[^\s)\]]*\/(?:api|mcp)[^\s)\]]*/gi, "")
+    .replace(/\bPASS\s*-\s*data unavailable\b/gi, "")
     .replace(/\bsource failure\b/gi, "")
-    .replace(/Market\s*:\s*(?:,\s*)+(?:and\s*)?/gi, "Market line not found yet. ")
-    .replace(/\bMarket odds not found yet\b/gi, "Market line not found yet")
-    .replace(/\bmarket odds not found yet\b/gi, "Market line not found yet");
+    .replace(/Market\s*:\s*(?:,\s*)+(?:and\s*)?/gi, "")
+    .replace(/\bMarket odds not found yet\b/gi, "")
+    .replace(/\bmarket odds not found yet\b/gi, "");
   sanitized = sanitized.replace(/\n{3,}/g, "\n\n").trim();
   return sanitized || "No publishable answer is available right now.";
 }
@@ -170,7 +170,7 @@ function formatEsportsTimestamp(input?: string): string {
 
 function describeOddsLine(odd: SportOdds): string {
   if (odd.market_data_status?.state !== "partial") return "";
-  return `ESPN checked · Market line not found yet · ${formatEsportsTimestamp(odd.fetched_at) || "updated now"}`;
+  return `Status: Updating lines · ${formatEsportsTimestamp(odd.fetched_at) || "updated now"}`;
 }
 
 function buildAuthErrorMessage(errorCode: string): string {
@@ -209,8 +209,8 @@ function PitcherDisplay({ teamFull, headshot, name, record, alignRight = false, 
         <div className={`flex items-center gap-1.5 mb-0.5 ${alignRight ? 'flex-row-reverse' : ''}`}>
           <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{teamAbbr.toUpperCase()}</span>
         </div>
-        <span className={`${small ? 'text-xs' : 'text-sm'} font-semibold text-zinc-700 leading-none mb-1`}>{name || 'TBA'}</span>
-        <span className="text-[10px] font-mono text-zinc-800">{record || '-'}</span>
+        <span className={`${small ? 'text-xs' : 'text-sm'} font-semibold text-zinc-700 leading-none mb-1`}>{name || '—'}</span>
+        <span className="text-[10px] font-mono text-zinc-800">{!record || record === '0' || record === '0-0' || record === '0.00 ERA' || record === 'N/A' || record === '0.0%' ? '—' : record}</span>
       </div>
     </div>
   );
@@ -599,27 +599,22 @@ export default function App() {
             <SideNavIcon 
               active={activeTab === 'chat'} 
               onClick={() => setActiveTab('chat')}
-              icon={<MessageSquare size={20} strokeWidth={1.5} />}
+              label="MSG"
             />
           <SideNavIcon 
             active={activeTab === 'odds'} 
             onClick={() => setActiveTab('odds')}
-            icon={<TrendingUp size={20} strokeWidth={1.5} />}
+            label="TRND"
           />
               <SideNavIcon 
                 active={activeTab === 'ledger'} 
                 onClick={() => setActiveTab('ledger')}
-                icon={<BarChart size={20} strokeWidth={1.5} />}
-              />
-              <SideNavIcon 
-                active={activeTab === 'wallet'} 
-                onClick={() => setActiveTab('wallet')}
-                icon={<Calendar size={20} strokeWidth={1.5} />}
+                label="WLT"
               />
               <SideNavIcon 
                 active={activeTab === 'artifacts'} 
                 onClick={() => user ? setActiveTab('artifacts') : handleLogin()}
-                icon={<FileText size={20} strokeWidth={1.5} />}
+                label="DATA"
               />
         </nav>
 
@@ -939,8 +934,8 @@ export default function App() {
                                       </div>
                                     </>
                                   ) : (
-                                    <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-4 py-3 text-[11px] uppercase tracking-widest text-zinc-500">
-                                      {describeOddsLine(odd) || "ESPN checked. Market line not found yet."}
+                                    <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-4 py-3 text-[11px] uppercase tracking-widest text-zinc-500 mt-2">
+                                      {describeOddsLine(odd) || "Lines updating..."}
                                     </div>
                                   )}
                                 </div>
@@ -957,14 +952,14 @@ export default function App() {
                                         teamFull={odd.away_team} 
                                         name={odd.away_pitcher} 
                                         headshot={odd.away_pitcher_headshot} 
-                                        record={odd.away_pitcher_record} 
+                                        record={odd.away_pitcher_record || "0-0"} 
                                         small
                                       />
                                       <PitcherDisplay 
                                         teamFull={odd.home_team} 
                                         name={odd.home_pitcher} 
                                         headshot={odd.home_pitcher_headshot} 
-                                        record={odd.home_pitcher_record} 
+                                        record={odd.home_pitcher_record || "0-0"} 
                                         alignRight 
                                         small
                                       />
@@ -1063,7 +1058,7 @@ export default function App() {
                          type="text"
                          value={inputText}
                          onChange={(e) => setInputText(e.target.value)}
-                         placeholder="Ask Baseline"
+                         placeholder="Ask about a matchup, player prop, or team trend."
                          className="w-full bg-transparent border-none rounded-lg px-1 md:px-3 py-2 md:py-3 focus:outline-none transition-all text-base md:text-sm text-ink placeholder:text-zinc-500"
                        />
                        <button 
@@ -1130,7 +1125,7 @@ export default function App() {
                            odd={odd} 
                            onClick={() => {
                              setActiveTab('chat');
-                             setInputText(`Read on ${odd.away_team} @ ${odd.home_team}`);
+                             setInputText(`Analysis for ${odd.away_team} vs ${odd.home_team}?`);
                              setTimeout(() => {
                                 (document.querySelector('input[type="text"]') as HTMLInputElement)?.focus();
                              }, 100);
@@ -1370,16 +1365,22 @@ export default function App() {
                           <div>
                             <div className="flex items-center gap-2 mb-1">
                               {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-brand live-pulse" />}
-                              <span className="text-[10px] font-mono text-zinc-600 group-hover:text-zinc-900 transition-colors">
+                              <span className="text-[10px] font-mono flex items-center gap-1.5 transition-colors">
                                 {odd.status === 'live' ? (
-                                  <>LIVE{odd.situation ? ` • ${odd.situation}` : ''}</>
+                                  <>
+                                    <span className="font-bold tracking-widest text-brand uppercase">LIVE</span>
+                                    {odd.situation && (
+                                      <span className="px-1.5 py-0.5 bg-brand/10 text-brand rounded border border-brand/20 font-bold tracking-widest text-[9px] uppercase">
+                                        {odd.situation}
+                                      </span>
+                                    )}
+                                  </>
                                 ) : odd.status === 'final' ? (
-                                  <>FINAL</>
+                                  <span className="text-zinc-600 group-hover:text-zinc-900 font-bold tracking-widest uppercase">FINAL</span>
                                 ) : (
-                                  new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-                                )}
-                                {odd.market_data_status?.state === 'partial' && (
-                                  <span className="ml-2 uppercase tracking-wide text-[9px] text-zinc-500">ESPN checked</span>
+                                  <span className="text-zinc-600 group-hover:text-zinc-900 font-medium">
+                                    {new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                  </span>
                                 )}
                               </span>
                             </div>
@@ -1408,7 +1409,7 @@ export default function App() {
                               </div>
                             )}
                             {!moneylineStr && !totalPoint && odd.market_data_status?.state === "partial" && (
-                              <span className="text-[10px] uppercase tracking-widest text-zinc-500">ESPN checked · market line not found yet</span>
+                              <span className="text-[10px] uppercase tracking-widest text-zinc-500">Lines updating...</span>
                             )}
                           </div>
                         </div>
@@ -1486,7 +1487,7 @@ export default function App() {
               )}
               
               <div className="p-10 text-center mt-auto border-t border-zinc-100/50">
-                <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">ESPN checked board state</span>
+                <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Board state</span>
               </div>
             </div>
           </aside>
@@ -1546,17 +1547,23 @@ function AuthLanding({ onLogin }: { onLogin: () => void }) {
 
 import { PricingView } from './components/PricingView';
 
-function SideNavIcon({ active, onClick, icon }: { active: boolean, onClick: () => void, icon: React.ReactNode }) {
+function SideNavIcon({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon?: React.ReactNode, label?: string }) {
   return (
     <button 
       onClick={onClick}
       className="relative flex flex-col items-center group transition-all duration-300 focus-visible:outline-none"
     >
       <div className={cn(
-        "w-10 h-10 flex items-center justify-center transition-all rounded-[14px]",
+        "w-12 h-12 flex items-center justify-center transition-all rounded-[14px]",
         active ? "bg-zinc-200/60 text-ink shadow-sm" : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/50"
       )}>
-        {icon}
+        {label ? (
+          <span className="text-[10px] font-mono font-bold tracking-widest uppercase">
+            {label}
+          </span>
+        ) : (
+          icon
+        )}
       </div>
     </button>
   );
