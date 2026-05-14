@@ -16,18 +16,19 @@ You requested to push the current codebase to a new GitHub repo.
 
 ## 2. GitHub Actions Setup
 A strictly scoped GitHub Actions file has been placed in `.github/workflows/deploy.yml`. 
-It executes an auto-deploy to Cloud Run (`gen-lang-client-0281999829` project) on every push to the `main` branch.
+It executes an auto-deploy to Cloud Run (`workflowos-a0fbf` project) on every push to the `main` branch.
 
 **To configure securely:**
 1. In your new GitHub Repo, go to **Settings > Secrets and variables > Actions**.
 2. Create a new Repository Secret named `GCP_CREDENTIALS`.
-3. Paste the contents of your Google Cloud Service Account JSON key the action will use to authenticate to `gen-lang-client-0281999829`.
+3. Paste the contents of your Google Cloud Service Account JSON key the action will use to authenticate to `workflowos-a0fbf`.
 
 ## 3. Cloud Run & Secret Manager Setup
 In your architecture, the `deploy.yml` references environment variables safely managed via **Google Cloud Secret Manager**. It does NOT upload `.env.local` to GitHub.
 
-Create these secrets in **Google Cloud Secret Manager** inside the `gen-lang-client-0281999829` project:
+Create these secrets in **Google Cloud Secret Manager** inside the `workflowos-a0fbf` project:
 - `stripe_secret_key`
+- `odds_api_key`
 - `firebase_service_account`
 - `gemini_api_key`
 
@@ -44,7 +45,7 @@ Once launched remotely, external UI clients can connect to `https://baseline.bet
 *Note: Write-tools and strict authenticated-clients are marked as a V2 addition.*
 
 ## 5. Deployment Setup Checklist
-- [x] **Project Verification:** Deploy to `gen-lang-client-0281999829` on `us-central1`
+- [x] **Project Verification:** Deploy to `workflowos-a0fbf` on `us-central1`
 - [ ] **Custom Domain:** Map your custom domain (`baseline.bet`) directly to the Cloud Run service via the **Cloud Run > Manage Custom Domains** UI or via **Global HTTP(s) Load Balancer** (recommended for Cloud CDN).
 - [ ] **Cloud CDN:** If scaling, route the custom domain through a GCP Global HTTP(S) Load Balancer and enable Cloud CDN on the backend service to cache static assets located in the `/dist` directory.
 - [ ] **Cloud Logging/Monitoring:** Already native to Cloud Run. Application errors and access events are recorded automatically in Operations Suite via stdout.

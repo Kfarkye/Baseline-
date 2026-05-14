@@ -192,13 +192,17 @@ function buildAuthErrorMessage(errorCode: string): string {
   return `Sign-in failed: ${errorCode}`;
 }
 
-function PitcherDisplay({ teamFull, headshot, name, record, alignRight = false, small = false }: { teamFull: string, headshot?: string, name?: string, record?: string, alignRight?: boolean, small?: boolean }) {
+function PitcherDisplay({ teamFull, headshot, name, record, alignRight = false, small = false, dark = false }: { teamFull: string, headshot?: string, name?: string, record?: string, alignRight?: boolean, small?: boolean, dark?: boolean }) {
   const teamAbbr = MLB_TEAM_MAP[teamFull as keyof typeof MLB_TEAM_MAP] || teamFull.substring(0, 3);
   const fallbackImg = `https://api.dicebear.com/7.x/initials/svg?seed=${name || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`;
 
   return (
     <div className={`flex items-center gap-3 ${alignRight ? 'justify-end flex-row-reverse text-right' : ''}`}>
-      <div className={`${small ? 'w-8 h-8' : 'w-10 h-10'} rounded-full overflow-hidden bg-zinc-100 shrink-0 shadow-sm border border-zinc-200`}>
+      <div className={cn(
+         small ? 'w-8 h-8' : 'w-10 h-10',
+         "rounded-full overflow-hidden shrink-0 shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-colors",
+         dark ? "bg-black/20 border border-white/10" : "bg-transparent border border-white/[0.08]"
+      )}>
         <img 
             src={headshot || fallbackImg} 
             className="w-full h-full object-cover scale-110" 
@@ -207,10 +211,16 @@ function PitcherDisplay({ teamFull, headshot, name, record, alignRight = false, 
       </div>
       <div className={`flex flex-col ${alignRight ? 'items-end' : ''}`}>
         <div className={`flex items-center gap-1.5 mb-0.5 ${alignRight ? 'flex-row-reverse' : ''}`}>
-          <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">{teamAbbr.toUpperCase()}</span>
+          <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest font-mono">{teamAbbr.toUpperCase()}</span>
         </div>
-        <span className={`${small ? 'text-xs' : 'text-sm'} font-semibold text-zinc-700 leading-none mb-1`}>{name || '—'}</span>
-        <span className="text-[10px] font-mono text-zinc-800">{!record || record === '0' || record === '0-0' || record === '0.00 ERA' || record === 'N/A' || record === '0.0%' ? '—' : record}</span>
+        <span className={cn(
+            small ? 'text-xs' : 'text-sm',
+            "font-semibold leading-none mb-1",
+            dark ? "text-zinc-300" : "text-zinc-300"
+        )}>{name || '—'}</span>
+        <span className={cn("text-[10px] font-mono", dark ? "text-zinc-400" : "text-white")}>
+            {!record || record === '0' || record === '0-0' || record === '0.00 ERA' || record.includes('N/A') || record === '0.0%' ? '—' : record}
+        </span>
       </div>
     </div>
   );
@@ -537,25 +547,25 @@ export default function App() {
   };
 
   if (isLoadingArtifact) {
-    return <div className="min-h-[100dvh] w-full flex items-center justify-center bg-paper text-zinc-500 font-mono text-sm uppercase tracking-widest animate-pulse">Loading Artifact...</div>;
+    return <div className="min-h-[100dvh] w-full flex items-center justify-center bg-transparent text-zinc-500 font-mono text-sm uppercase tracking-widest animate-pulse">Loading Artifact...</div>;
   }
 
   if (sharedArtifact) {
     return (
-      <div className="min-h-[100dvh] w-full bg-zinc-100 flex flex-col items-center overflow-auto px-4 py-8 safe-area-bottom">
+      <div className="min-h-[100dvh] w-full bg-transparent flex flex-col items-center overflow-auto px-4 py-8 safe-area-bottom">
         <div className="w-full max-w-[850px] flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 flex items-center justify-center font-serif italic text-xl font-medium text-brand select-none leading-none">B</div>
+            <div className="w-6 h-6 flex items-center justify-center font-serif italic text-xl font-medium text-white select-none leading-none">B</div>
             <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">Document Artifact</span>
           </div>
           <button 
              onClick={() => window.location.href = window.location.origin}
-             className="text-[11px] font-medium text-brand px-4 py-2 border border-brand/20 bg-brand/5 rounded-full hover:bg-brand/10 transition-colors"
+             className="text-[11px] font-medium text-white px-4 py-2 border border-brand/20 bg-amber-400/5 rounded-full hover:bg-amber-400/10 transition-colors"
           >
             Create Your Own
           </button>
         </div>
-        <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[70dvh]">
+        <div className="w-full max-w-[850px] liquid-glass min-h-[70dvh]">
           <iframe 
             srcDoc={sharedArtifact} 
             className="w-full h-full min-h-[70dvh] border-none"
@@ -581,48 +591,48 @@ export default function App() {
   }, [activeTab]);
 
   return (
-    <div className="flex min-h-[100dvh] bg-paper text-ink font-sans overflow-hidden relative">
+    <div className="flex min-h-[100dvh] bg-transparent text-white font-sans overflow-hidden relative">
       {/* Subtle Ambient Bleed */}
-      <div className="ambient-blob ambient-blob-1"></div>
-      <div className="ambient-blob ambient-blob-2"></div>
-      <div className="ambient-blob ambient-blob-3"></div>
-      <div className="absolute inset-0 bg-paper/60 backdrop-blur-[100px] z-0 pointer-events-none" />
+      <div className="ambient-glow"></div>
+      <div className="hidden"></div>
+      <div className="hidden"></div>
+      <div className="absolute inset-0 bg-transparent/60 backdrop-blur-[100px] z-0 pointer-events-none" />
 
       <div className="flex h-full w-full z-10 relative">
       {/* Primary Global Navigation */}
-      <aside className="hidden md:flex w-16 flex-col items-center py-8 border-r border-zinc-200 bg-paper shrink-0 z-30">
+      <aside className="hidden md:flex w-16 flex-col items-center py-8 border-r border-white/[0.08] bg-transparent shrink-0 z-30">
         <div className="mb-10">
-          <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-brand select-none leading-none">B</div>
+          <div className="w-8 h-8 flex items-center justify-center font-serif italic text-3xl font-medium text-white select-none leading-none">B</div>
         </div>
         
         <nav className="flex flex-col gap-6 flex-1">
-            <SideNavIcon 
-              active={activeTab === 'chat'} 
-              onClick={() => setActiveTab('chat')}
-              label="MSG"
-            />
+          <SideNavIcon 
+            active={activeTab === 'chat'} 
+            onClick={() => setActiveTab('chat')}
+            label="Chat"
+          />
           <SideNavIcon 
             active={activeTab === 'odds'} 
             onClick={() => setActiveTab('odds')}
-            label="TRND"
+            label="Markets"
           />
-              <SideNavIcon 
-                active={activeTab === 'ledger'} 
-                onClick={() => setActiveTab('ledger')}
-                label="WLT"
-              />
-              <SideNavIcon 
-                active={activeTab === 'artifacts'} 
-                onClick={() => user ? setActiveTab('artifacts') : handleLogin()}
-                label="DATA"
-              />
+          <SideNavIcon 
+            active={activeTab === 'ledger'} 
+            onClick={() => setActiveTab('ledger')}
+            label="Ledger"
+          />
+          <SideNavIcon 
+            active={activeTab === 'artifacts'} 
+            onClick={() => user ? setActiveTab('artifacts') : handleLogin()}
+            label="Vault"
+          />
         </nav>
 
         <div className="mt-auto flex flex-col gap-6 items-center">
-          <button onClick={() => setShowAboutModal(true)} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50/80 transition-all duration-300">
+          <button onClick={() => setShowAboutModal(true)} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-zinc-500 hover:text-white hover:bg-white/10 transition-all duration-300">
             <Info size={20} strokeWidth={1.5} />
           </button>
-          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-brand hover:bg-brand/10 transition-all duration-300 mb-2">
+          <button onClick={() => navigate('/pricing')} className="w-10 h-10 flex items-center justify-center rounded-[14px] text-white hover:bg-amber-400/10 transition-all duration-300 mb-2">
             <Zap size={20} strokeWidth={1.5} />
           </button>
         </div>
@@ -631,29 +641,29 @@ export default function App() {
       {/* About Modal */}
       <AnimatePresence>
         {showAboutModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-paper/80 backdrop-blur-sm overflow-y-auto">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-white/10 backdrop-blur-sm overflow-y-auto">
              <motion.div 
                initial={{ opacity: 0, scale: 0.95 }}
                animate={{ opacity: 1, scale: 1 }}
                exit={{ opacity: 0, scale: 0.95 }}
-               className="bg-white border border-zinc-200 shadow-xl rounded-2xl p-8 max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto relative"
+               className="liquid-glass border-none border-white/[0.08] shadow-xl rounded-2xl p-8 max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-y-auto relative"
              >
                <button 
                  onClick={() => setShowAboutModal(false)}
-                 className="absolute top-6 right-6 text-zinc-500 hover:text-ink"
+                 className="absolute top-6 right-6 text-zinc-500 hover:text-white"
                >
                  <X size={20} strokeWidth={1.5} />
                </button>
-               <div className="w-10 h-10 bg-brand/10 text-brand rounded-full flex items-center justify-center mb-6">
+               <div className="w-10 h-10 bg-amber-400/20 text-white-light rounded-full flex items-center justify-center mb-6">
                  <Info size={20} strokeWidth={1.5} />
                </div>
-               <h3 className="text-2xl font-serif font-medium text-ink tracking-tight mb-4">About Baseline</h3>
-               <div className="space-y-4 text-sm text-zinc-600 leading-relaxed">
+               <h3 className="text-2xl font-serif font-medium text-white tracking-tight mb-4">About Baseline</h3>
+               <div className="space-y-4 text-sm text-zinc-400 leading-relaxed">
                  <p>
                    Baseline connects generative AI directly to real-time sports market data. 
                  </p>
                  <div className="space-y-2">
-                   <p><strong className="text-ink">Modes:</strong></p>
+                   <p><strong className="text-white">Modes:</strong></p>
                    <ul className="list-disc pl-4 space-y-1">
                      <li><strong>Live:</strong> Real-time scores, innings, odds shifts.</li>
                      <li><strong>Stats:</strong> Pitcher metrics, team splits, historicals.</li>
@@ -663,11 +673,11 @@ export default function App() {
                  <p>
                    Use the chat or tap a game card to explore deep-dive analytics for any matchup. ESPN checks all game-level context in-session.
                  </p>
-                 <div className="pt-4 border-t border-zinc-100 space-y-2">
-                   Feedback? <a href="mailto:hello@baseline.com" className="text-brand hover:underline">hello@baseline.com</a>
-                   <p><a href={APP_SHELL_LINKS.privacyPolicyUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">Privacy Policy</a></p>
-                   <p><a href={APP_SHELL_LINKS.termsOfServiceUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">Terms of Service</a></p>
-                   <p><a href={APP_SHELL_LINKS.appSupportUrl} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">App Support</a></p>
+                 <div className="pt-4 border-t border-white/[0.04] space-y-2">
+                   Feedback? <a href="mailto:hello@baseline.com" className="text-white hover:underline">hello@baseline.com</a>
+                   <p><a href={APP_SHELL_LINKS.privacyPolicyUrl} target="_blank" rel="noopener noreferrer" className="text-white hover:underline">Privacy Policy</a></p>
+                   <p><a href={APP_SHELL_LINKS.termsOfServiceUrl} target="_blank" rel="noopener noreferrer" className="text-white hover:underline">Terms of Service</a></p>
+                   <p><a href={APP_SHELL_LINKS.appSupportUrl} target="_blank" rel="noopener noreferrer" className="text-white hover:underline">App Support</a></p>
                    <p className="text-xs text-zinc-500">{IOS_WRAPPER_NOTE}</p>
                  </div>
                </div>
@@ -677,17 +687,17 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 bg-paper safe-area-bottom relative">
+      <main className="flex-1 flex flex-col min-w-0 bg-transparent safe-area-bottom relative">
         {/* Unified Header */}
         <header className={cn(
-          "h-16 items-center justify-between px-4 sm:px-6 xl:px-10 border-b border-zinc-100/80 bg-paper/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20 safe-area-top",
+          "h-16 items-center justify-between px-4 sm:px-6 xl:px-10 border-b border-white/[0.04]/80 bg-black/70 backdrop-blur-xl backdrop-saturate-150 sticky top-0 z-20 safe-area-top",
           isMobileChatScreen ? "hidden md:flex" : "flex"
         )}>
           <div className="flex items-center gap-4 sm:gap-6">
             <button
               type="button"
               onClick={() => setIsMobileTabMenuOpen((prev) => !prev)}
-              className="md:hidden w-10 h-10 rounded-full border border-zinc-200 bg-white/90 text-zinc-700 flex items-center justify-center"
+              className="md:hidden w-10 h-10 rounded-full border border-white/[0.08] bg-transparent/90 text-zinc-300 flex items-center justify-center"
               aria-label="Open navigation menu"
             >
               <Menu size={18} />
@@ -713,29 +723,29 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsUserMenuOpen((prev) => !prev)}
-                  className="w-9 h-9 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center overflow-hidden cursor-pointer focus-visible:outline-none"
+                  className="w-9 h-9 rounded-full bg-transparent border border-white/[0.08] flex items-center justify-center overflow-hidden cursor-pointer focus-visible:outline-none"
                   aria-label="Open account menu"
                   aria-expanded={isUserMenuOpen}
                 >
                   {user.photoURL ? <img src={user.photoURL} alt="" /> : <UserIcon size={12} className="text-zinc-500" />}
                 </button>
                 <div className={cn(
-                  "absolute right-0 top-full mt-2 w-52 bg-white border border-zinc-100 shadow-xl rounded-lg py-2 z-50",
+                  "absolute right-0 top-full mt-2 w-52 liquid-glass border-none border-white/[0.04] shadow-xl rounded-lg py-2 z-50",
                   isUserMenuOpen ? "block" : "hidden"
                 )}>
                    <div className="px-4 py-2 border-b border-zinc-50 mb-2">
-                     <p className="text-xs font-bold text-ink truncate">{user.email}</p>
+                     <p className="text-xs font-bold text-white truncate">{user.email}</p>
                    </div>
-                   <button onClick={() => { setIsUserMenuOpen(false); navigate('/pricing'); }} className="w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
-                     <Zap size={14} className="text-brand" /> Manage Subscription
+                   <button onClick={() => { setIsUserMenuOpen(false); navigate('/pricing'); }} className="w-full text-left px-4 py-2 text-sm text-zinc-300 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2">
+                     <Zap size={14} className="text-white" /> Manage Subscription
                    </button>
-                   <button onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} className="w-full text-left px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50 hover:text-ink transition-colors flex items-center gap-2">
+                   <button onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} className="w-full text-left px-4 py-2 text-sm text-zinc-300 hover:bg-white/10 hover:text-white transition-colors flex items-center gap-2">
                      <LogOut size={14} /> Sign out
                    </button>
                 </div>
               </div>
             ) : (
-              <button onClick={handleLogin} className="bg-ink hover:bg-brand text-white text-xs font-bold uppercase tracking-widest px-5 py-2.5 rounded-full transition-all hover:shadow-lg hover:shadow-brand/20 active:scale-[0.98]">
+              <button onClick={handleLogin} className="bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-bold uppercase tracking-widest px-5 py-2.5 rounded-full transition-all shadow-[0_4px_12px_rgba(0,0,0,0.1)] active:scale-[0.98]">
                 Sign In
               </button>
             )}
@@ -756,23 +766,23 @@ export default function App() {
                 animate={{ x: 0, opacity: 1 }}
                 exit={{ x: -24, opacity: 0 }}
                 transition={{ duration: 0.16 }}
-                className="absolute left-3 right-3 top-[max(0.75rem,env(safe-area-inset-top))] bg-white border border-zinc-200 rounded-2xl shadow-xl p-3"
+                className="absolute left-3 right-3 top-[max(0.75rem,env(safe-area-inset-top))] liquid-glass border-none border-white/[0.08] rounded-2xl shadow-xl p-3"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  <button type="button" onClick={() => { setActiveTab('chat'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'chat' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Chat</button>
-                  <button type="button" onClick={() => { setActiveTab('odds'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'odds' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Daily Board</button>
-                  <button type="button" onClick={() => { setActiveTab('ledger'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'ledger' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Ledger</button>
-                  <button type="button" onClick={() => { setActiveTab('wallet'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'wallet' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Schedule</button>
-                  <button type="button" onClick={() => { user ? setActiveTab('artifacts') : handleLogin(); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'artifacts' ? "border-brand/50 bg-brand/10 text-brand" : "border-zinc-200 text-zinc-700")}>Artifacts</button>
-                  <button type="button" onClick={() => { navigate('/pricing'); setIsMobileTabMenuOpen(false); }} className="rounded-xl px-3 py-3 text-left text-sm border border-zinc-200 text-zinc-700">Pricing</button>
+                  <button type="button" onClick={() => { setActiveTab('chat'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'chat' ? "border-brand/50 bg-amber-400/20 text-white-light" : "border-white/[0.08] text-zinc-300")}>Chat</button>
+                  <button type="button" onClick={() => { setActiveTab('odds'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'odds' ? "border-brand/50 bg-amber-400/20 text-white-light" : "border-white/[0.08] text-zinc-300")}>Markets</button>
+                  <button type="button" onClick={() => { setActiveTab('ledger'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'ledger' ? "border-brand/50 bg-amber-400/20 text-white-light" : "border-white/[0.08] text-zinc-300")}>Ledger</button>
+                  <button type="button" onClick={() => { setActiveTab('wallet'); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'wallet' ? "border-brand/50 bg-amber-400/20 text-white-light" : "border-white/[0.08] text-zinc-300")}>Schedule</button>
+                  <button type="button" onClick={() => { user ? setActiveTab('artifacts') : handleLogin(); setIsMobileTabMenuOpen(false); }} className={cn("rounded-xl px-3 py-3 text-left text-sm border", activeTab === 'artifacts' ? "border-brand/50 bg-amber-400/20 text-white-light" : "border-white/[0.08] text-zinc-300")}>Vault</button>
+                  <button type="button" onClick={() => { navigate('/pricing'); setIsMobileTabMenuOpen(false); }} className="rounded-xl px-3 py-3 text-left text-sm border border-white/[0.08] text-zinc-300">Pricing</button>
                 </div>
-                <div className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-3">
-                  <button type="button" onClick={() => { setShowAboutModal(true); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">About</button>
+                <div className="flex items-center justify-between gap-2 border-t border-white/[0.04] pt-3">
+                  <button type="button" onClick={() => { setShowAboutModal(true); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-300 uppercase tracking-widest">About</button>
                   {user ? (
-                    <button type="button" onClick={() => { handleLogout(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">Sign Out</button>
+                    <button type="button" onClick={() => { handleLogout(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-300 uppercase tracking-widest">Sign Out</button>
                   ) : (
-                    <button type="button" onClick={() => { handleLogin(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-700 uppercase tracking-widest">Sign In</button>
+                    <button type="button" onClick={() => { handleLogin(); setIsMobileTabMenuOpen(false); }} className="text-xs font-semibold text-zinc-300 uppercase tracking-widest">Sign In</button>
                   )}
                 </div>
               </motion.div>
@@ -781,7 +791,7 @@ export default function App() {
         </AnimatePresence>
 
         <div className="flex-1 flex flex-col xl:flex-row overflow-hidden relative">
-          <div className="flex-1 flex flex-col min-w-0 xl:border-r border-zinc-100 relative">
+          <div className="flex-1 flex flex-col min-w-0 xl:border-r border-white/[0.04] relative">
              <Routes>
                <Route path="/" element={
                  <AnimatePresence mode="wait">
@@ -793,17 +803,17 @@ export default function App() {
                   exit={{ opacity: 0 }}
                   className="h-full flex flex-col max-w-5xl mx-auto w-full"
                 >
-                  <div className="md:hidden px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 border-b border-zinc-100/80 bg-paper/90 backdrop-blur-sm sticky top-0 z-20">
+                  <div className="md:hidden px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 border-b border-white/[0.04]/80 bg-transparent/90 backdrop-blur-sm sticky top-0 z-20">
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
                         onClick={() => setIsMobileTabMenuOpen((prev) => !prev)}
-                        className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
+                        className="w-11 h-11 rounded-full liquid-glass border-none border-white/[0.08] text-white flex items-center justify-center"
                         aria-label="Open navigation menu"
                       >
                         <Menu size={19} />
                       </button>
-                      <div className="px-5 h-11 rounded-full bg-white/95 border border-zinc-200 text-brand text-[15px] font-medium flex items-center justify-center min-w-[128px]">
+                      <div className="px-5 h-11 rounded-full bg-black/90 border border-white/[0.08] text-white text-[15px] font-medium flex items-center justify-center min-w-[128px]">
                         {isTyping ? "Thinking" : "Baseline"}
                       </div>
                       <div className="flex items-center gap-2">
@@ -814,7 +824,7 @@ export default function App() {
                             setGroundingMode(null);
                             setActiveTab('chat');
                           }}
-                          className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
+                          className="w-11 h-11 rounded-full liquid-glass border-none border-white/[0.08] text-white flex items-center justify-center"
                           aria-label="New chat"
                         >
                           <PenSquare size={19} />
@@ -822,7 +832,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => setShowAboutModal(true)}
-                          className="w-11 h-11 rounded-full bg-white border border-zinc-200 text-zinc-800 flex items-center justify-center"
+                          className="w-11 h-11 rounded-full liquid-glass border-none border-white/[0.08] text-white flex items-center justify-center"
                           aria-label="More actions"
                         >
                           <MoreHorizontal size={19} />
@@ -835,7 +845,7 @@ export default function App() {
                     {messages.length === 0 && (
                       <div className="pb-8 pt-4">
                         <div className="mb-8">
-                          <h3 className="text-2xl serif-italic font-medium text-ink tracking-tight">
+                          <h3 className="text-2xl serif-italic font-medium text-white tracking-tight">
                             Today's Slate
                           </h3>
                           {isLoadingOdds ? (
@@ -858,15 +868,15 @@ export default function App() {
                                    (document.querySelector('input[type="text"]') as HTMLInputElement)?.focus();
                                  }, 100);
                                }}
-                               className="block w-full bg-white border border-zinc-200 p-4 sm:p-6 rounded-xl text-left hover:border-zinc-300 hover:shadow-sm transition-all group flex flex-col gap-4 relative overflow-hidden"
+                               className="block w-full liquid-glass border-none border-white/[0.08] p-4 sm:p-6 rounded-xl text-left hover:border-zinc-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all group flex flex-col gap-4 relative overflow-hidden"
                              >
                                 {odd.status === 'live' && (
-                                  <div className="absolute top-0 left-0 w-full h-1 bg-brand" />
+                                  <div className="absolute top-0 left-0 w-full h-1 bg-amber-400" />
                                 )}
                                 <div className="flex justify-between items-start">
                                   <div>
                                     <div className="flex items-center gap-2 mb-1">
-                                      {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
+                                      {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-amber-400 live-pulse shrink-0" />}
                                       <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{odd.sport_title} {odd.status === 'live' ? '• LIVE' : ''}</span>
                                     </div>
                                     <span className="text-xs font-mono text-zinc-500">{odd.venue || 'TBA'} • {new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
@@ -874,11 +884,11 @@ export default function App() {
                                   <div className="text-right">
                                     {(odd.status === 'live' && odd.score) ? (
                                       <>
-                                        <div className="text-lg font-mono font-bold text-ink">{odd.score}</div>
-                                        <div className="text-xs text-brand font-medium">{odd.situation}</div>
+                                        <div className="text-lg font-mono font-bold text-white">{odd.score}</div>
+                                        <div className="text-xs text-white font-medium">{odd.situation}</div>
                                       </>
                                     ) : (
-                                      <div className="text-[11px] text-zinc-500 serif italic bg-zinc-50 px-3 py-1 rounded-full border border-zinc-100">
+                                      <div className="text-[11px] text-zinc-500 serif italic bg-transparent px-3 py-1 rounded-full border border-white/[0.04]">
                                         {odd.context || 'Regular Season'}
                                       </div>
                                     )}
@@ -886,23 +896,23 @@ export default function App() {
                                 </div>
                                 
                                 <div className="space-y-3">
-                                  {odd.bookmakers?.length ? (
+                                  {odd.status !== 'final' && odd.bookmakers?.length ? (
                                     <>
                                       <div className="flex justify-between items-center">
                                         <div className="flex items-center gap-4">
-                                          <img src={getEspnLogo(odd.away_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
+                                          <img src={getEspnLogo(odd.away_team)} className="w-10 h-10 rounded-full border border-white/[0.04] shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-transform hover:scale-105" alt="" />
                                           <div>
-                                            <div className="font-medium text-lg text-ink serif">{odd.away_team}</div>
+                                            <div className="font-medium text-lg text-white serif">{odd.away_team}</div>
                                           </div>
                                         </div>
                                         <div className="text-right flex items-center gap-4">
-                                          {odd.bookmakers?.[0]?.markets?.map(m => {
+                                          {odd.bookmakers?.[0]?.markets?.filter(m => ['h2h', 'spreads', 'totals'].includes(m.key)).filter((m, i, arr) => arr.findIndex(x => x.key === m.key) === i).map(m => {
                                             const outcome = m.outcomes.find(o => o.name?.includes(odd.away_team) || odd.away_team?.includes(o.name) || o.name === 'Over');
                                             if (!outcome) return null;
                                             return (
                                               <div key={m.key} className="flex flex-col items-end">
                                                 <span className="text-[9px] uppercase tracking-widest text-zinc-500 mb-0.5">{m.key === 'h2h' ? 'ML' : m.key === 'spreads' ? 'Spread' : 'Total'}</span>
-                                                <span className="font-mono text-sm text-ink font-medium">
+                                                <span className="font-mono text-sm text-white font-medium">
                                                   {m.key === 'totals' ? `O ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
                                                 </span>
                                               </div>
@@ -913,18 +923,18 @@ export default function App() {
                                       
                                       <div className="flex justify-between items-center">
                                         <div className="flex items-center gap-4">
-                                          <img src={getEspnLogo(odd.home_team)} className="w-10 h-10 rounded-full border border-zinc-100 shadow-sm transition-transform hover:scale-105" alt="" />
+                                          <img src={getEspnLogo(odd.home_team)} className="w-10 h-10 rounded-full border border-white/[0.04] shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-transform hover:scale-105" alt="" />
                                           <div>
-                                            <div className="font-medium text-lg text-ink serif">{odd.home_team}</div>
+                                            <div className="font-medium text-lg text-white serif">{odd.home_team}</div>
                                           </div>
                                         </div>
                                         <div className="text-right flex items-center gap-4">
-                                          {odd.bookmakers?.[0]?.markets?.map(m => {
+                                          {odd.bookmakers?.[0]?.markets?.filter(m => ['h2h', 'spreads', 'totals'].includes(m.key)).filter((m, i, arr) => arr.findIndex(x => x.key === m.key) === i).map(m => {
                                             const outcome = m.outcomes.find(o => o.name?.includes(odd.home_team) || odd.home_team?.includes(o.name) || o.name === 'Under');
                                             if (!outcome) return null;
                                             return (
                                               <div key={m.key} className="flex flex-col items-end">
-                                                <span className="font-mono text-sm text-ink font-medium relative top-[14px]">
+                                                <span className="font-mono text-sm text-white font-medium relative top-[14px]">
                                                   {m.key === 'totals' ? `U ${outcome.point}` : (outcome.point ? `${outcome.point > 0 ? '+' : ''}${outcome.point}` : (outcome.price > 0 ? `+${outcome.price}` : outcome.price))}
                                                 </span>
                                               </div>
@@ -933,16 +943,16 @@ export default function App() {
                                         </div>
                                       </div>
                                     </>
-                                  ) : (
-                                    <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-4 py-3 text-[11px] uppercase tracking-widest text-zinc-500 mt-2">
+                                  ) : odd.status !== 'final' ? (
+                                    <div className="rounded-xl border border-white/[0.08]/70 bg-black/70 px-4 py-3 text-[11px] uppercase tracking-widest text-zinc-500 mt-2">
                                       {describeOddsLine(odd) || "Lines updating..."}
                                     </div>
-                                  )}
+                                  ) : null}
                                 </div>
                                 
                                 {/* Featured Pitcher Matchup */}
                                 {(odd.away_pitcher || odd.home_pitcher) && (
-                                  <div className="mt-4 pt-4 border-t border-zinc-100/60 transition-opacity">
+                                  <div className="mt-4 pt-4 border-t border-white/[0.04]/60 transition-opacity">
                                     <div className="flex items-center gap-2 mb-3">
                                       <div className="w-1.5 h-1.5 rotate-45 bg-[#2D4A3E] shrink-0 opacity-80" />
                                       <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Pitching Matchup</span>
@@ -975,16 +985,23 @@ export default function App() {
                       <ChatMessageItem key={i} m={m} />
                     ))}
                     {isTyping && (
-                      <div className="flex gap-4 items-center">
-                         <div className="w-1 h-1 bg-brand rounded-full animate-pulse" />
-                         <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Calculating...</span>
-                      </div>
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex gap-4 items-center p-6 liquid-glass rounded-3xl max-w-[200px] border border-white/[0.08]"
+                      >
+                         <div className="relative flex items-center justify-center w-4 h-4">
+                           <span className="absolute w-full h-full rounded-full border border-emerald-500/50 animate-[ping_1.5s_ease-in-out_infinite]" />
+                           <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+                         </div>
+                         <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-zinc-400">Neural Pulse</span>
+                      </motion.div>
                     )}
                      <div ref={chatEndRef} />
                    </div>
                    
                    {/* Minimal Input Area */}
-                   <div className="px-3 sm:px-6 lg:px-10 xl:px-12 pt-3 pb-3 sticky bottom-0 bg-paper/95 backdrop-blur-md border-t border-zinc-100/70 flex flex-col z-20 safe-area-bottom">
+                   <div className="px-3 sm:px-6 lg:px-10 xl:px-12 pt-3 pb-3 sticky bottom-0 bg-black/90 backdrop-blur-md border-t border-white/[0.04]/70 flex flex-col z-20 safe-area-bottom">
                      <div className="hidden md:flex gap-2 mb-3 flex-wrap">
                        {(['live', 'stats', 'trends'] as const).map(mode => {
                          const isActive = groundingMode === mode;
@@ -996,12 +1013,12 @@ export default function App() {
                              className={cn(
                                "flex items-center justify-center transition-all text-[11px] rounded-[14px] px-[14px] py-[6px] tracking-wide uppercase",
                                isActive
-                                 ? "bg-[#2D4A3E]/10 border border-[#2D4A3E]/60 text-brand font-medium"
-                                 : "bg-transparent border border-[#2D4A3E]/30 text-brand/70 hover:text-brand hover:border-[#2D4A3E]/50"
+                                 ? "bg-[#2D4A3E]/10 border border-[#2D4A3E]/60 text-white font-medium"
+                                 : "bg-transparent border border-[#2D4A3E]/30 text-white/70 hover:text-white hover:border-[#2D4A3E]/50"
                              )}
                            >
                              {isActive && (
-                               <span className="w-1.5 h-1.5 rounded-full bg-brand mr-2" />
+                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mr-2" />
                              )}
                              {mode}
                            </button>
@@ -1016,7 +1033,7 @@ export default function App() {
                              key={idx}
                              type="button" 
                              onClick={() => setInputText(sug)} 
-                             className="text-[11px] bg-white border border-zinc-200 text-zinc-600 px-4 py-2 rounded-full hover:bg-zinc-50 hover:text-ink transition-colors"
+                             className="text-[11px] liquid-glass border-none border-white/[0.08] text-zinc-400 px-4 py-2 rounded-full hover:bg-white/10 hover:text-white transition-colors"
                            >
                              {sug}
                            </button>
@@ -1035,8 +1052,8 @@ export default function App() {
                              className={cn(
                                "flex items-center justify-center whitespace-nowrap transition-all text-[10px] rounded-full px-3 py-1.5 uppercase tracking-wide border",
                                isActive
-                                 ? "bg-[#2D4A3E]/10 border-[#2D4A3E]/60 text-brand font-medium"
-                                 : "bg-white border-zinc-200 text-zinc-600"
+                                 ? "bg-[#2D4A3E]/10 border-[#2D4A3E]/60 text-white font-medium"
+                                 : "liquid-glass border-none-white/[0.08] text-zinc-400"
                              )}
                            >
                              {mode}
@@ -1045,11 +1062,11 @@ export default function App() {
                        })}
                      </div>
 
-                     <form onSubmit={sendMessage} className="relative shadow-sm rounded-full flex items-center gap-2 w-full bg-white border border-zinc-200 px-3 py-2">
+                     <form onSubmit={sendMessage} className="relative shadow-[0_8px_30px_rgb(0,0,0,0.12)] rounded-full flex items-center gap-2 w-full liquid-glass border-none border-white/[0.08] px-3 py-2">
                        <button
                          type="button"
                          onClick={() => setIsMobileTabMenuOpen(true)}
-                         className="md:hidden w-9 h-9 rounded-full text-zinc-700 hover:bg-zinc-100 flex items-center justify-center"
+                         className="md:hidden w-9 h-9 rounded-full text-zinc-300 hover:bg-white/10 flex items-center justify-center"
                          aria-label="Open quick actions"
                        >
                          <Plus size={20} />
@@ -1059,11 +1076,11 @@ export default function App() {
                          value={inputText}
                          onChange={(e) => setInputText(e.target.value)}
                          placeholder="Ask about a matchup, player prop, or team trend."
-                         className="w-full bg-transparent border-none rounded-lg px-1 md:px-3 py-2 md:py-3 focus:outline-none transition-all text-base md:text-sm text-ink placeholder:text-zinc-500"
+                         className="w-full bg-transparent border-none rounded-lg px-1 md:px-3 py-2 md:py-3 focus:outline-none transition-all text-base md:text-sm text-white placeholder:text-zinc-500"
                        />
                        <button 
                          type="button"
-                         className="md:hidden w-9 h-9 rounded-full text-zinc-500 hover:bg-zinc-100 flex items-center justify-center"
+                         className="md:hidden w-9 h-9 rounded-full text-zinc-500 hover:bg-white/10 flex items-center justify-center"
                          aria-label="Voice input"
                        >
                          <Mic size={18} />
@@ -1071,7 +1088,7 @@ export default function App() {
                        <button 
                          type="submit"
                          disabled={!inputText.trim() || isTyping}
-                         className="w-10 h-10 rounded-full bg-ink text-white flex items-center justify-center transition-colors disabled:opacity-30"
+                         className="w-10 h-10 rounded-full bg-zinc-900 text-white flex items-center justify-center transition-colors disabled:opacity-30 hover:bg-zinc-800"
                        >
                          <Send size={18} strokeWidth={1.8} />
                        </button>
@@ -1086,22 +1103,22 @@ export default function App() {
                    initial={{ opacity: 0 }}
                    animate={{ opacity: 1 }}
                    exit={{ opacity: 0 }}
-                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto custom-scrollbar"
+                   className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto custom-scrollbar bg-transparent selection:bg-amber-400/30"
                  >
                    <div className="max-w-5xl mx-auto space-y-10">
-                     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-zinc-100 pb-7">
+                     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/[0.08] pb-7">
                        <div>
-                         <h2 className="text-3xl sm:text-4xl serif-italic font-medium text-ink tracking-tight mb-4">The Daily Board</h2>
-                         <div className="flex items-center gap-2 bg-zinc-50/50 p-1 rounded-lg border border-zinc-100 inline-flex">
+                         <h2 className="text-3xl sm:text-4xl serif-italic font-medium text-white tracking-tight mb-4">The Daily Board</h2>
+                         <div className="flex items-center gap-2 bg-transparent p-1 rounded-lg border border-white/[0.04] inline-flex">
                            {['previous', 'today', 'tomorrow'].map(filter => (
                              <button
                                key={filter}
                                onClick={() => setSlateFilter(filter as any)}
                                className={cn(
-                                 "text-[11px] uppercase tracking-widest font-bold px-6 py-2 rounded-md transition-all",
+                                 "text-[10px] uppercase tracking-widest font-bold px-6 py-2 rounded-md transition-all font-mono",
                                  slateFilter === filter 
-                                   ? "bg-white text-brand shadow-sm ring-1 ring-zinc-200/50" 
-                                   : "text-zinc-500 hover:text-ink hover:bg-zinc-100/50"
+                                   ? "bg-transparent text-white shadow-[0_2px_8px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.04]" 
+                                   : "text-zinc-500 hover:text-white hover:bg-black/[0.04]"
                                )}
                              >
                                {filter}
@@ -1111,14 +1128,36 @@ export default function App() {
                        </div>
                        <button 
                          onClick={refreshOdds}
-                         className="flex items-center gap-2 group text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-ink transition-colors"
+                         className="flex items-center gap-2 group text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors font-mono"
                        >
                          <RefreshCw size={12} className={isTyping ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"} strokeWidth={2} />
                          Refresh Feed
                        </button>
                      </div>
 
-                     <div className="grid md:grid-cols-2 gap-5 md:gap-6 mt-2">
+                     
+<div className="mb-8 space-y-6">
+  <div className="flex items-center gap-2 bg-transparent p-1.5 rounded-2xl border border-white/[0.04] max-w-sm mx-auto shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+    <button className="flex-1 py-3 text-xs font-bold uppercase tracking-widest text-white bg-transparent rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)]">Books</button>
+    <button className="flex-1 py-3 text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors">Prediction</button>
+  </div>
+  
+  <div className="flex items-center justify-center gap-2">
+    {['ALL', 'LIVE', 'PREGAME', 'ENDED'].map(filter => (
+      <button 
+        key={filter}
+        className={cn(
+          "px-5 py-2.5 rounded-full text-[10px] font-bold tracking-widest uppercase transition-all",
+          filter === 'ALL' ? "bg-zinc-900 text-white shadow-lg" : "bg-transparent text-zinc-500 hover:text-white border border-white/[0.04]"
+        )}
+      >
+        {filter}
+      </button>
+    ))}
+  </div>
+</div>
+
+<div className="grid md:grid-cols-2 gap-5 md:gap-6 mt-2">
                        {fullSlate.map((odd) => (
                          <OddsCard 
                            key={odd.id} 
@@ -1133,13 +1172,13 @@ export default function App() {
                          />
                        ))}
                        {isLoadingOdds ? (
-                          <div className="col-span-full py-16 flex flex-col items-center justify-center border border-dashed border-zinc-200 rounded-xl space-y-4">
-                             <RefreshCw className="animate-spin text-zinc-300" size={24} />
-                             <p className="text-zinc-500 italic serif">Hydrating market data...</p>
+                          <div className="col-span-full py-16 flex flex-col items-center justify-center border border-dashed border-white/[0.08] rounded-xl space-y-4">
+                             <RefreshCw className="animate-spin text-zinc-500" size={24} />
+                             <p className="text-zinc-400 italic serif">Hydrating market data...</p>
                           </div>
                        ) : fullSlate.length === 0 ? (
-                          <div className="col-span-full py-20 flex flex-col items-center justify-center text-center border border-dashed border-zinc-200 rounded-xl">
-                             <p className="text-zinc-600 font-medium mb-1">No games today.</p>
+                          <div className="col-span-full py-20 flex flex-col items-center justify-center text-center border border-dashed border-white/[0.08] rounded-xl">
+                             <p className="text-zinc-400 font-medium mb-1">No games today.</p>
                              <p className="text-zinc-500 text-sm">Check back tomorrow.</p>
                           </div>
                        ) : null}
@@ -1157,40 +1196,40 @@ export default function App() {
                    className="p-4 sm:p-6 xl:p-10 h-full flex flex-col overflow-y-auto custom-scrollbar"
                  >
                    <div className="max-w-3xl">
-                     <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight mb-2">My Action Ledger</h2>
+                     <h2 className="text-4xl serif-italic font-medium text-white tracking-tight mb-2">My Action Ledger</h2>
                      <p className="text-zinc-500 font-mono text-sm mb-12">Private beta matching your bet history against public ML facts.</p>
                      
-                     <div className="bg-zinc-50 border border-zinc-100 rounded-xl p-8 mb-8 relative overflow-hidden">
+                     <div className="bg-transparent border border-white/[0.04] rounded-xl p-8 mb-8 relative overflow-hidden">
                        <div className="absolute top-0 right-0 p-4">
                        </div>
-                       <h3 className="text-lg serif font-medium text-ink mb-4">Your Edges and Leaks</h3>
-                       <p className="text-zinc-600 text-sm leading-relaxed mb-6 font-mono">
+                       <h3 className="text-lg serif font-medium text-white mb-4">Your Edges and Leaks</h3>
+                       <p className="text-zinc-400 text-sm leading-relaxed mb-6 font-mono">
                          Pattern matching your recent MLB history in `credentialdb` against real-time ESPN situational data. You have a heavy tendency (-14% ROI) to back home favorites on getaway day games.
                        </p>
-                       <div className="flex items-center gap-4 border-t border-zinc-200/50 pt-4">
-                         <button className="text-[11px] uppercase tracking-widest font-bold text-ink hover:text-brand transition-colors flex items-center gap-2">
+                       <div className="flex items-center gap-4 border-t border-white/[0.08]/50 pt-4">
+                         <button className="text-[11px] uppercase tracking-widest font-bold text-white hover:text-white transition-colors flex items-center gap-2">
                            Run Full Audit <ChevronRight size={14} />
                          </button>
                        </div>
                      </div>
 
                      <div className="space-y-4">
-                       <h3 className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-500 mb-4 border-b border-zinc-100 pb-2">Recent Logged Bets</h3>
+                       <h3 className="text-[10px] font-bold tracking-[0.3em] uppercase text-zinc-500 mb-4 border-b border-white/[0.04] pb-2">Recent Logged Bets</h3>
                        
-                       <div className="flex items-center justify-between p-4 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors">
+                       <div className="flex items-center justify-between p-4 border border-white/[0.04] rounded-lg hover:border-white/[0.08] transition-colors">
                          <div className="flex flex-col gap-1">
-                           <span className="text-sm font-semibold text-ink">Phillies ML</span>
+                           <span className="text-sm font-semibold text-white">Phillies ML</span>
                            <span className="text-[10px] font-mono text-zinc-500">vs Athletics • May 5, 2026</span>
                          </div>
                          <div className="flex flex-col items-end gap-1">
                            <span className="text-sm font-mono text-zinc-500">-135</span>
-                           <span className="text-[10px] font-bold uppercase text-brand">Win</span>
+                           <span className="text-[10px] font-bold uppercase text-white">Win</span>
                          </div>
                        </div>
 
-                       <div className="flex items-center justify-between p-4 border border-zinc-100 rounded-lg hover:border-zinc-200 transition-colors">
+                       <div className="flex items-center justify-between p-4 border border-white/[0.04] rounded-lg hover:border-white/[0.08] transition-colors">
                          <div className="flex flex-col gap-1">
-                           <span className="text-sm font-semibold text-ink">Orioles / Marlins Under 8.5</span>
+                           <span className="text-sm font-semibold text-white">Orioles / Marlins Under 8.5</span>
                            <span className="text-[10px] font-mono text-zinc-500">MIA @ BAL • May 4, 2026</span>
                          </div>
                          <div className="flex flex-col items-end gap-1">
@@ -1199,7 +1238,7 @@ export default function App() {
                          </div>
                        </div>
                        
-                       <button className="w-full mt-4 py-4 border border-zinc-200 border-dashed rounded-lg text-zinc-500 hover:text-ink hover:border-zinc-300 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+                       <button className="w-full mt-4 py-4 border border-white/[0.08] border-dashed rounded-lg text-zinc-500 hover:text-white hover:border-zinc-300 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2">
                          <PlusCircle size={14} /> Log Manual Bet
                        </button>
                      </div>
@@ -1216,21 +1255,21 @@ export default function App() {
                    className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto"
                  >
                    <div className="max-w-4xl mx-auto">
-                      <div className="border-b border-zinc-100 pb-10 mb-12">
-                        <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">Schedule</h2>
+                      <div className="border-b border-white/[0.04] pb-10 mb-12">
+                        <h2 className="text-4xl serif-italic font-medium text-white tracking-tight">Schedule</h2>
                         <p className="text-zinc-500 text-[10px] uppercase tracking-[0.35em] font-bold mt-4">Upcoming Rotations</p>
                       </div>
                       
                       <div className="space-y-6">
                          {[1,2,3,4,5].map(i => (
-                           <div key={i} className="flex items-center gap-4 sm:gap-8 py-6 border-b border-zinc-100 group">
-                              <span className="font-mono text-zinc-500 group-hover:text-ink transition-colors">0{i}</span>
+                           <div key={i} className="flex items-center gap-4 sm:gap-8 py-6 border-b border-white/[0.04] group">
+                              <span className="font-mono text-zinc-500 group-hover:text-white transition-colors">0{i}</span>
                               <div className="flex-1">
-                                 <h4 className="text-lg font-medium text-zinc-600 group-hover:text-ink transition-colors">San Francisco AT Los Angeles</h4>
+                                 <h4 className="text-lg font-medium text-zinc-400 group-hover:text-white transition-colors">San Francisco AT Los Angeles</h4>
                                  <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mt-1">7:10 PM ET • Dodger Stadium</p>
                               </div>
                               <div className="text-right">
-                                 <span className="block font-mono text-zinc-600 group-hover:text-brand transition-colors">-145 / +125</span>
+                                 <span className="block font-mono text-zinc-400 group-hover:text-white transition-colors">-145 / +125</span>
                                  <span className="text-[9px] uppercase font-bold text-zinc-500">Total 8.5</span>
                               </div>
                            </div>
@@ -1249,28 +1288,28 @@ export default function App() {
                    className="h-full p-4 sm:p-6 xl:p-10 overflow-y-auto"
                  >
                    <div className="max-w-4xl mx-auto">
-                     <div className="border-b border-zinc-100 pb-10 mb-12">
-                       <h2 className="text-4xl serif-italic font-medium text-ink tracking-tight">Generated Artifacts</h2>
+                     <div className="border-b border-white/[0.04] pb-10 mb-12">
+                       <h2 className="text-4xl serif-italic font-medium text-white tracking-tight">Generated Artifacts</h2>
                        <p className="text-zinc-500 text-[10px] uppercase tracking-[0.35em] font-bold mt-4">Registry of interfaces & reports</p>
                      </div>
                      
                      {artifactsList.length === 0 ? (
-                       <div className="bg-white border border-dashed border-zinc-200 rounded-lg p-16 text-center text-zinc-500 flex flex-col items-center">
+                       <div className="liquid-glass border-none border-dashed border-white/[0.08] rounded-lg p-16 text-center text-zinc-500 flex flex-col items-center">
                           <FileText size={32} strokeWidth={1} className="text-zinc-300 mb-6" />
-                          <h3 className="serif text-2xl mb-2 text-ink">No artifacts yet</h3>
+                          <h3 className="serif text-2xl mb-2 text-white">No artifacts yet</h3>
                           <p className="font-mono text-xs">Ask the generative model to create an interface or report.</p>
                        </div>
                      ) : (
                        <div className="grid gap-6">
                          {artifactsList.map((artifact) => (
-                           <div key={artifact.id} className="bg-white border border-zinc-200 rounded-xl p-8 hover:shadow-md transition-all group flex justify-between items-center cursor-pointer relative overflow-hidden" onClick={() => window.open(`?artifact=${artifact.id}`, '_blank', 'noopener,noreferrer')}>
+                           <div key={artifact.id} className="liquid-glass border-none border-white/[0.08] rounded-xl p-8 hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all group flex justify-between items-center cursor-pointer relative overflow-hidden" onClick={() => window.open(`?artifact=${artifact.id}`, '_blank', 'noopener,noreferrer')}>
                              <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
                                <FileText size={120} />
                              </div>
                              <div className="flex flex-col gap-3 relative z-10">
                                <div className="flex items-center gap-4">
-                                 <h3 className="font-serif text-2xl text-ink group-hover:text-brand transition-colors">{artifact.title || 'Untitled Interface'}</h3>
-                                 <span className="bg-zinc-100 text-zinc-600 px-3 py-1 rounded-full text-[9px] uppercase font-bold tracking-widest">{artifact.type}</span>
+                                 <h3 className="font-serif text-2xl text-white group-hover:text-white transition-colors">{artifact.title || 'Untitled Interface'}</h3>
+                                 <span className="bg-transparent text-zinc-400 px-3 py-1 rounded-full text-[9px] uppercase font-bold tracking-widest">{artifact.type}</span>
                                </div>
                                <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-zinc-500">
                                  <span className="flex items-center gap-2"><Globe size={14} className="text-zinc-500" /> {artifact.source || 'Generated Server-Side'}</span>
@@ -1279,7 +1318,7 @@ export default function App() {
                                  )}
                                </div>
                              </div>
-                             <div className="relative z-10 w-12 h-12 flex items-center justify-center rounded-full bg-zinc-50 group-hover:bg-brand group-hover:text-white transition-colors">
+                             <div className="relative z-10 w-12 h-12 flex items-center justify-center rounded-full bg-transparent group-hover:bg-amber-400 group-hover:text-white transition-colors">
                                <ChevronRight size={20} className="text-zinc-500 group-hover:text-white transition-colors" />
                              </div>
                            </div>
@@ -1298,12 +1337,12 @@ export default function App() {
 
           {/* Sidebar / Bottom Rail */}
           <aside className={cn(
-            "w-full xl:w-80 bg-white flex flex-col shrink-0 border-t xl:border-t-0 xl:border-l border-zinc-100 xl:overflow-y-auto custom-scrollbar safe-area-bottom",
+            "w-full xl:w-80 bg-transparent flex flex-col shrink-0 border-t xl:border-t-0 xl:border-l border-white/[0.04] xl:overflow-y-auto custom-scrollbar safe-area-bottom",
             activeTab === 'chat' ? "hidden xl:flex" : ""
           )}>
             {/* Mobile Toggle */}
             <button 
-              className="xl:hidden w-full h-16 flex items-center justify-between px-4 sm:px-6 border-b border-zinc-100 bg-white sticky top-0 z-10"
+              className="xl:hidden w-full h-16 flex items-center justify-between px-4 sm:px-6 border-b border-white/[0.04] bg-transparent sticky top-0 z-10"
               onClick={() => setIsSlateExpanded(!isSlateExpanded)}
             >
               <span className="text-[10px] font-bold tracking-[0.35em] text-zinc-500 uppercase">View Action & Results</span>
@@ -1313,7 +1352,7 @@ export default function App() {
             <div className={cn("xl:block", !isSlateExpanded && "hidden")}>
               {/* Full Slate */}
               <div className="border-b border-black/10">
-                <div className="hidden xl:flex flex-col border-b border-black/10 bg-white sticky top-0 z-10 pt-4">
+                <div className="hidden xl:flex flex-col border-b border-black/10 bg-transparent sticky top-0 z-10 pt-4">
                   <div className="px-10 mb-4 flex justify-between items-center">
                     <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Full Slate</span>
                   </div>
@@ -1323,10 +1362,10 @@ export default function App() {
                         key={filter}
                         onClick={() => setSlateFilter(filter as any)}
                         className={cn(
-                          "flex-1 text-[9px] uppercase tracking-widest font-bold py-3 text-center transition-colors border-b-2 hover:bg-zinc-50",
+                          "flex-1 text-[9px] uppercase tracking-widest font-bold py-3 text-center transition-colors border-b-2 hover:bg-white/10",
                           slateFilter === filter 
-                            ? "border-brand text-brand" 
-                            : "border-transparent text-zinc-500 hover:text-zinc-800"
+                            ? "border-brand text-white" 
+                            : "border-transparent text-zinc-500 hover:text-white"
                         )}
                       >
                         {filter}
@@ -1358,33 +1397,33 @@ export default function App() {
                         to={`/game/${odd.id}`}
                         className={cn(
                           "block w-full flex flex-col px-6 xl:px-10 py-5 border-b border-zinc-50/50 transition-colors group text-left",
-                          odd.status === 'live' ? "bg-brand/5 hover:bg-brand/10" : "hover:bg-zinc-50"
+                          odd.status === 'live' ? "bg-amber-400/5 hover:bg-amber-400/10" : "hover:bg-white/10"
                         )}
                       >
                         <div className="w-full flex items-center justify-between">
                           <div>
                             <div className="flex items-center gap-2 mb-1">
-                              {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-brand live-pulse" />}
+                              {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 live-pulse" />}
                               <span className="text-[10px] font-mono flex items-center gap-1.5 transition-colors">
                                 {odd.status === 'live' ? (
                                   <>
-                                    <span className="font-bold tracking-widest text-brand uppercase">LIVE</span>
+                                    <span className="font-bold tracking-widest text-white uppercase">LIVE</span>
                                     {odd.situation && (
-                                      <span className="px-1.5 py-0.5 bg-brand/10 text-brand rounded border border-brand/20 font-bold tracking-widest text-[9px] uppercase">
+                                      <span className="px-1.5 py-0.5 bg-amber-400/20 text-white-light rounded border border-brand/20 font-bold tracking-widest text-[9px] uppercase">
                                         {odd.situation}
                                       </span>
                                     )}
                                   </>
                                 ) : odd.status === 'final' ? (
-                                  <span className="text-zinc-600 group-hover:text-zinc-900 font-bold tracking-widest uppercase">FINAL</span>
+                                  <span className="text-zinc-400 group-hover:text-white font-bold tracking-widest uppercase">FINAL</span>
                                 ) : (
-                                  <span className="text-zinc-600 group-hover:text-zinc-900 font-medium">
+                                  <span className="text-zinc-400 group-hover:text-white font-medium">
                                     {new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                   </span>
                                 )}
                               </span>
                             </div>
-                            <div className="text-sm serif text-zinc-800 mt-1">
+                            <div className="text-sm serif text-white mt-1">
                               {odd.status === 'live' || odd.status === 'final' ? (
                                 <div className="flex flex-col gap-1">
                                   <span>{odd.away_team} <span className="font-mono font-bold text-xs ml-1">{odd.away_score || "0"}</span></span>
@@ -1396,20 +1435,24 @@ export default function App() {
                             </div>
                           </div>
                           <div className="text-right flex flex-col items-end gap-1.5">
-                            {moneylineStr && (
-                              <div className="text-right">
-                                <span className="text-[10px] uppercase tracking-widest text-zinc-500 mr-2">ML</span>
-                                <span className="font-mono text-sm text-zinc-800">{moneylineStr}</span>
-                              </div>
-                            )}
-                            {totalPoint && (
-                              <div className="text-right">
-                                <span className="text-[10px] uppercase tracking-widest text-zinc-500 mr-2">O/U</span>
-                                <span className="font-mono text-sm text-zinc-800">{totalPoint}</span>
-                              </div>
-                            )}
-                            {!moneylineStr && !totalPoint && odd.market_data_status?.state === "partial" && (
-                              <span className="text-[10px] uppercase tracking-widest text-zinc-500">Lines updating...</span>
+                            {odd.status !== 'final' && (
+                              <>
+                                {moneylineStr && (
+                                  <div className="text-right flex items-center gap-2">
+                                    <span className="text-[10px] uppercase tracking-widest text-zinc-500">ML</span>
+                                    <span className="font-mono text-sm text-white">{moneylineStr}</span>
+                                  </div>
+                                )}
+                                {totalPoint && (
+                                  <div className="text-right flex items-center gap-2">
+                                    <span className="text-[10px] uppercase tracking-widest text-zinc-500">O/U</span>
+                                    <span className="font-mono text-sm text-white">{totalPoint}</span>
+                                  </div>
+                                )}
+                                {!moneylineStr && !totalPoint && odd.market_data_status?.state === "partial" && (
+                                  <span className="text-[10px] uppercase tracking-widest text-zinc-500">Lines updating...</span>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -1418,8 +1461,8 @@ export default function App() {
                         {(odd.away_pitcher || odd.home_pitcher) && (
                           <div className="w-full mt-4 pt-3 border-t border-black/10 transition-opacity">
                             <div className="flex items-center gap-2 mb-3">
-                              <div className="w-1.5 h-1.5 rotate-45 bg-zinc-300 group-hover:bg-brand transition-colors shrink-0" />
-                              <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500 group-hover:text-brand transition-colors">Pitching Matchup</span>
+                              <div className="w-1.5 h-1.5 rotate-45 bg-zinc-300 group-hover:bg-amber-400 transition-colors shrink-0" />
+                              <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500 group-hover:text-white transition-colors">Pitching Matchup</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <PitcherDisplay 
@@ -1449,7 +1492,7 @@ export default function App() {
               {/* Recent Finals */}
               {finalGames.length > 0 && (
                 <div>
-                  <div className="h-16 flex items-center px-6 xl:px-10 border-b border-zinc-100 bg-white sticky top-0 z-10">
+                  <div className="h-16 flex items-center px-6 xl:px-10 border-b border-white/[0.04] bg-transparent sticky top-0 z-10">
                     <span className="text-[10px] font-bold tracking-[0.4em] text-zinc-500 uppercase">Recent Finals</span>
                   </div>
                   <div className="p-6 xl:p-10 space-y-10">
@@ -1457,27 +1500,27 @@ export default function App() {
                       <div key={idx} className="space-y-4">
                         <div className="flex justify-between items-center">
                           <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-tight truncate w-32">{odd.sport_title}</span>
-                          <span className="text-[9px] font-mono text-brand italic">FINAL</span>
+                          <span className="text-[9px] font-mono text-white italic">FINAL</span>
                         </div>
                         <div className="space-y-2">
                           <div className="flex justify-between items-center text-sm">
                             <div className="flex items-center gap-2.5 opacity-60">
-                              <img src={getEspnLogo(odd.away_team)} className="w-5 h-5 rounded-full border border-zinc-100 shadow-sm" alt="" />
-                              <span className="serif text-ink">{odd.away_team}</span>
+                              <img src={getEspnLogo(odd.away_team)} className="w-5 h-5 rounded-full border border-white/[0.04] shadow-[0_8px_30px_rgb(0,0,0,0.12)]" alt="" />
+                              <span className="serif text-white">{odd.away_team}</span>
                             </div>
                             <span className="font-mono text-zinc-500">{odd.away_score || "0"}</span>
                           </div>
                           <div className="flex justify-between items-center text-sm">
                             <div className="flex items-center gap-2.5 font-medium">
-                              <img src={getEspnLogo(odd.home_team)} className="w-5 h-5 rounded-full border border-zinc-100 shadow-sm" alt="" />
-                              <span className="serif text-ink">{odd.home_team}</span>
+                              <img src={getEspnLogo(odd.home_team)} className="w-5 h-5 rounded-full border border-white/[0.04] shadow-[0_8px_30px_rgb(0,0,0,0.12)]" alt="" />
+                              <span className="serif text-white">{odd.home_team}</span>
                             </div>
-                            <span className="font-mono font-bold text-ink">{odd.home_score || "0"}</span>
+                            <span className="font-mono font-bold text-white">{odd.home_score || "0"}</span>
                           </div>
                         </div>
                         {odd.result_context && (
                           <div className="text-[11px] text-zinc-500 serif italic mt-2">
-                            {odd.score} — {odd.result_context.replace('✓', '')} <span className="text-brand not-italic ml-1">✓</span>
+                            {odd.score} — {odd.result_context.replace('✓', '')} <span className="text-white not-italic ml-1">✓</span>
                           </div>
                         )}
                       </div>
@@ -1486,7 +1529,7 @@ export default function App() {
                 </div>
               )}
               
-              <div className="p-10 text-center mt-auto border-t border-zinc-100/50">
+              <div className="p-10 text-center mt-auto border-t border-white/[0.04]/50">
                 <span className="text-[9px] uppercase tracking-widest font-bold text-zinc-500">Board state</span>
               </div>
             </div>
@@ -1502,7 +1545,7 @@ export default function App() {
 
 function AuthLanding({ onLogin }: { onLogin: () => void }) {
   return (
-    <div className="min-h-[100dvh] bg-paper flex flex-col items-center justify-center p-6 sm:p-12 text-center text-ink selection:bg-brand/10 safe-area-top safe-area-bottom">
+    <div className="min-h-[100dvh] bg-transparent flex flex-col items-center justify-center p-6 sm:p-12 text-center text-white selection:bg-amber-400/10 safe-area-top safe-area-bottom">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1510,21 +1553,21 @@ function AuthLanding({ onLogin }: { onLogin: () => void }) {
         className="max-w-4xl w-full flex flex-col items-center"
       >
         <div className="mb-14 opacity-20">
-           <div className="w-12 h-12 flex items-center justify-center font-serif italic text-6xl font-medium text-brand">B</div>
+           <div className="w-12 h-12 flex items-center justify-center font-serif italic text-6xl font-medium text-white">B</div>
         </div>
         <h1 className="text-[18vw] sm:text-9xl font-semibold tracking-[-0.04em] leading-[0.85] mb-12 flex flex-col items-center">
            <span>THE DAILY</span>
-           <span className="serif-italic font-medium text-brand">BASELINE</span>
+           <span className="serif-italic font-medium text-white">BASELINE</span>
         </h1>
-        <p className="text-lg sm:text-xl text-zinc-600 max-w-xl mx-auto leading-relaxed mb-16 font-medium">
+        <p className="text-lg sm:text-xl text-zinc-400 max-w-xl mx-auto leading-relaxed mb-16 font-medium">
            Live odds, stats, and trends.
         </p>
         <button 
           onClick={onLogin}
-          className="group relative flex items-center gap-8 py-4 px-10 border border-zinc-200 rounded-full hover:border-[#2D4A3E]/30 hover:bg-[#2D4A3E]/5 transition-all duration-500 overflow-hidden"
+          className="group relative flex items-center gap-8 py-4 px-10 border border-white/[0.08] rounded-full hover:border-[#2D4A3E]/30 hover:bg-[#2D4A3E]/5 transition-all duration-500 overflow-hidden"
         >
-          <div className="text-[11px] font-bold uppercase tracking-[0.4em] text-zinc-500 group-hover:text-brand transition-colors z-10 relative">Enter Board</div>
-          <ChevronRight size={14} className="text-zinc-500 group-hover:text-brand group-hover:translate-x-2 transition-all duration-500 z-10 relative" />
+          <div className="text-[11px] font-bold uppercase tracking-[0.4em] text-zinc-500 group-hover:text-white transition-colors z-10 relative">Enter Board</div>
+          <ChevronRight size={14} className="text-zinc-500 group-hover:text-white group-hover:translate-x-2 transition-all duration-500 z-10 relative" />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#2D4A3E]/5 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
         </button>
       </motion.div>
@@ -1555,7 +1598,7 @@ function SideNavIcon({ active, onClick, icon, label }: { active: boolean, onClic
     >
       <div className={cn(
         "w-12 h-12 flex items-center justify-center transition-all rounded-[14px]",
-        active ? "bg-zinc-200/60 text-ink shadow-sm" : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100/50"
+        active ? "bg-zinc-200/60 text-white shadow-[0_8px_30px_rgb(0,0,0,0.12)]" : "text-zinc-500 hover:text-white hover:bg-black/50"
       )}>
         {label ? (
           <span className="text-[10px] font-mono font-bold tracking-widest uppercase">
@@ -1598,17 +1641,17 @@ function DeployDocumentBtn({ content }: { content: string }) {
   if (deployedUrl) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-brand">Deployed!</span>
+        <span className="text-[10px] text-white">Deployed!</span>
         <button 
           onClick={() => navigator.clipboard.writeText(deployedUrl)}
-          className="text-zinc-500 hover:text-zinc-700 transition-colors" 
+          className="text-zinc-500 hover:text-zinc-300 transition-colors" 
           title="Copy Link"
         >
           <Copy size={14} />
         </button>
         <button 
           onClick={() => window.open(deployedUrl, '_blank', 'noopener,noreferrer')}
-          className="text-zinc-500 hover:text-brand transition-colors" 
+          className="text-zinc-500 hover:text-white transition-colors" 
           title="Open in new tab"
         >
           <Globe size={14} />
@@ -1619,7 +1662,7 @@ function DeployDocumentBtn({ content }: { content: string }) {
 
   return (
     <button 
-      className="text-zinc-500 hover:text-brand transition-colors" 
+      className="text-zinc-500 hover:text-white transition-colors" 
       title="Generate Shareable Link"
       onClick={handleDeploy}
       disabled={isDeploying}
@@ -1632,42 +1675,55 @@ function DeployDocumentBtn({ content }: { content: string }) {
 function ChatMessageItem({ m }: { m: ChatMessage }) {
   const isAI = m.role === 'model';
   const renderText = isAI ? sanitizeConsumerSportsText(m.text) : m.text;
+  
+  const timeString = m.timestamp?.toMillis 
+    ? new Date(m.timestamp.toMillis()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})
+    : new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={cn("grid grid-cols-[1fr] gap-3 md:gap-4 max-w-3xl", !isAI && "ml-auto w-full md:w-auto")}
+      initial={{ opacity: 0, y: 15, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+      className={cn("flex flex-col gap-3 md:gap-4 w-full", isAI ? "max-w-4xl" : "max-w-3xl ml-auto")}
     >
-      <div className="space-y-4">
-        <div className={cn("hidden md:flex items-center gap-3", !isAI && "justify-end")}>
-          <span className="text-[8px] font-bold uppercase tracking-[0.4em] text-zinc-500">
-            {isAI ? 'Analysis' : 'You'}
-          </span>
-          <span className="w-1 h-1 bg-zinc-50 rounded-full" />
-          <span className="text-[8px] font-mono text-zinc-500 uppercase tabular-nums">06:05:26</span>
-        </div>
-        <div className={cn(
-          "leading-[1.8] tracking-tight text-[15px] md:text-sm",
-          isAI
-            ? "text-zinc-800 md:text-zinc-700 prose prose-emerald max-w-none prose-sm font-normal"
-            : "ml-auto max-w-[88%] md:max-w-none rounded-3xl bg-ink text-white md:bg-transparent md:text-ink font-medium md:serif-italic text-base md:text-lg px-4 py-3 md:px-6 md:py-0 md:border-r md:border-brand/20 text-left"
-        )}>
+      <div className={cn("flex items-center gap-3", !isAI && "justify-end")}>
+        <span className="text-[9px] font-bold uppercase tracking-[0.4em] text-zinc-500">
+          {isAI ? 'Baseline AI' : 'You'}
+        </span>
+        {isAI ? (
+          <div className="relative flex items-center justify-center w-3 h-3">
+            <span className="absolute w-full h-full rounded-full border border-emerald-500/40 animate-[ping_2s_ease-in-out_infinite]" />
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+          </div>
+        ) : (
+          <span className="w-1 h-1 bg-white/20 rounded-full" />
+        )}
+        <span className="text-[9px] font-mono text-zinc-500 uppercase tabular-nums tracking-widest">{timeString}</span>
+      </div>
+      
+      <div className={cn(
+        "leading-[1.8] tracking-tight text-[15px] md:text-sm transition-all duration-300",
+        isAI
+          ? "liquid-glass bg-black/40 backdrop-blur-2xl p-6 sm:p-8 rounded-[2rem] border border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.12)] text-white md:text-zinc-300 prose prose-invert prose-emerald max-w-none prose-sm font-normal"
+          : "ml-auto rounded-3xl bg-white/5 border border-white/[0.08] text-white font-medium text-base md:text-lg px-6 py-4 text-left shadow-sm backdrop-blur-md"
+      )}>
           {isAI ? (
             <ReactMarkdown 
               remarkPlugins={[remarkGfm]}
               components={{
-              p: ({ children }) => <p className="mb-7 last:mb-0 text-zinc-700 leading-[1.85]">{children}</p>,
-              strong: ({ children }) => <strong className="text-ink font-semibold">{children}</strong>,
+              p: ({ children }) => <p className="mb-7 last:mb-0 text-zinc-300 leading-[1.85]">{children}</p>,
+              strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
               table: ({ children }) => (
-                <div className="w-full overflow-x-auto my-8 rounded-2xl border border-zinc-200/60 shadow-sm bg-white/50 backdrop-blur-sm">
+                <div className="w-full overflow-x-auto my-8 rounded-2xl border border-white/[0.08]/60 shadow-[0_8px_30px_rgb(0,0,0,0.12)] bg-black/50 backdrop-blur-sm">
                   <table className="w-full text-left border-collapse text-sm">
                     {children}
                   </table>
                 </div>
               ),
-              thead: ({ children }) => <thead className="bg-zinc-50/50 border-b border-zinc-200/60">{children}</thead>,
+              thead: ({ children }) => <thead className="bg-black/50 border-b border-white/[0.08]/60">{children}</thead>,
               tbody: ({ children }) => <tbody className="divide-y divide-zinc-100/60">{children}</tbody>,
-              tr: ({ children, isHeader, ...props }: any) => <tr className="hover:bg-zinc-50/80 transition-colors" {...props}>{children}</tr>,
+              tr: ({ children, isHeader, ...props }: any) => <tr className="hover:bg-white/10 transition-colors" {...props}>{children}</tr>,
               th: ({ children }) => <th className="px-4 py-3 font-medium text-[10px] text-zinc-500 uppercase tracking-widest">{children}</th>,
               td: ({ children }) => {
                 let numValue = NaN;
@@ -1731,8 +1787,8 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                 if (!inline && match) {
                   if (match[1] === 'html') {
                     return (
-                      <div className="my-8 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-                        <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50/50 px-4 py-3">
+                      <div className="my-8 overflow-hidden rounded-xl border border-white/[0.08] bg-transparent shadow-[0_8px_30px_rgb(0,0,0,0.12)]">
+                        <div className="flex items-center justify-between border-b border-white/[0.04] bg-black/50 px-4 py-3">
                           <div className="flex items-center gap-2">
                             <FileText size={14} className="text-zinc-500" />
                             <span className="font-mono text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
@@ -1742,14 +1798,14 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                           <div className="flex items-center gap-2">
                             <DeployDocumentBtn content={codeString} />
                             <button 
-                              className="text-zinc-500 hover:text-zinc-700 transition-colors" 
+                              className="text-zinc-500 hover:text-zinc-300 transition-colors" 
                               title="Copy HTML"
                               onClick={() => navigator.clipboard.writeText(codeString)}
                             >
                               <Copy size={14} />
                             </button>
                             <button 
-                              className="text-zinc-500 hover:text-zinc-700 transition-colors" 
+                              className="text-zinc-500 hover:text-zinc-300 transition-colors" 
                               title="Show Source"
                               onClick={(e) => {
                                 const el = (e.target as HTMLElement).closest('.rounded-xl')?.querySelector('.raw-source');
@@ -1760,15 +1816,15 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                             </button>
                           </div>
                         </div>
-                        <div className="p-0 w-full overflow-hidden flex flex-col bg-zinc-100 items-center py-8">
-                          <div className="w-full max-w-[850px] bg-white shadow-sm ring-1 ring-zinc-900/5 min-h-[500px] relative">
+                        <div className="p-0 w-full overflow-hidden flex flex-col bg-transparent items-center py-8">
+                          <div className="w-full max-w-[850px] liquid-glass min-h-[500px] relative">
                             <iframe 
                                srcDoc={codeString} 
                                className="w-full h-full min-h-[500px] border-none"
                                sandbox=""
                                referrerPolicy="no-referrer"
                             />
-                            <div className="raw-source hidden absolute inset-0 bg-black/90 p-6 overflow-auto">
+                            <div className="raw-source hidden absolute inset-0 bg-black/90 backdrop-blur p-6 overflow-auto z-50">
                               <pre className="text-zinc-300 text-xs font-mono whitespace-pre-wrap">{codeString}</pre>
                             </div>
                           </div>
@@ -1778,8 +1834,8 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                   }
 
                   return (
-                    <div className="my-8 overflow-hidden rounded-xl border border-zinc-200 bg-[#1c1917] shadow-sm">
-                      <div className="flex items-center justify-between border-b border-zinc-800 bg-[#292524] px-4 py-3">
+                    <div className="my-8 overflow-hidden rounded-xl border border-white/[0.08] bg-transparent shadow-[0_8px_30px_rgb(0,0,0,0.12)]">
+                      <div className="flex items-center justify-between border-b border-white/[0.08] bg-white/[0.02] px-4 py-3">
                         <div className="flex items-center gap-2">
                           <TerminalSquare size={14} className="text-zinc-300" />
                           <span className="font-mono text-[11px] font-medium text-zinc-300 uppercase tracking-wider">
@@ -1810,16 +1866,12 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                     </div>
                   );
                 }
-                return <code className="bg-zinc-50 px-1 py-0.5 rounded font-mono text-[10px] text-zinc-800 border border-zinc-100"{...props}>{children}</code>;
+                return <code className="bg-transparent px-1 py-0.5 rounded font-mono text-[10px] text-white border border-white/[0.04]"{...props}>{children}</code>;
               }
-            }}>
-              {renderText}
-            </ReactMarkdown>
           ) : (
             renderText
           )}
         </div>
-      </div>
     </motion.div>
   );
 }
@@ -1834,63 +1886,68 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
   return (
     <button 
       onClick={onClick}
-      className="block relative outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 rounded-2xl w-full text-left"
+      className="block relative outline-none rounded-2xl w-full text-left group overflow-hidden"
     >
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className={cn(
-          "bg-white border rounded-2xl p-5 sm:p-6 space-y-6 group transition-all cursor-pointer h-full card-hover",
-          odd.status === 'live' ? "border-brand/40 bg-brand/5" : "border-zinc-100 hover:border-zinc-200"
+          "relative overflow-hidden p-5 sm:p-6 space-y-6 transition-all duration-500 cursor-pointer h-full",
+          "bg-transparent backdrop-blur-[24px] backdrop-saturate-[180%]",
+          "border-t border-white/[0.08] border-b border-black/50 border-x border-white/[0.04]",
+          "shadow-[0_2px_12px_rgba(0,0,0,0.04)] rounded-2xl hover:bg-white/10 active:bg-transparent"
         )}
       >
-        <div className="flex justify-between items-start">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.05)_0%,transparent_70%)] opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
+
+        <div className="flex justify-between items-start relative z-10">
            <div className="space-y-1 flex items-center gap-3">
-              {odd.status === 'live' && <span className="w-2 h-2 rounded-full bg-brand live-pulse shrink-0" />}
-              <span className="text-[8px] text-zinc-500 uppercase tracking-[0.4em] font-bold">
+              {odd.status === 'live' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 live-pulse shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />}
+              <span className="text-[10px] text-zinc-400 uppercase tracking-[0.4em] font-bold font-mono">
                  {odd.sport_title} {odd.status === 'live' ? '• LIVE' : odd.status === 'final' ? '• FINAL' : `• ${new Date(odd.commence_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`}
               </span>
            </div>
         </div>
-        <div>
-           <h4 className="text-2xl serif-italic font-medium text-ink tracking-tight">{odd.away_team.split(' ').pop()} @ {odd.home_team.split(' ').pop()}</h4>
+        
+        <div className="relative z-10">
+           <h4 className="text-2xl font-serif text-white tracking-tight">{odd.away_team.split(' ').pop()} @ {odd.home_team.split(' ').pop()}</h4>
         </div>
 
-        <div className="space-y-6">
-         {odd.bookmakers?.length ? (
+        <div className="space-y-6 relative z-10">
+         {odd.status !== 'final' && odd.bookmakers?.length ? (
            <>
              <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
-               <img src={getLogo(odd.home_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
+               <img src={getLogo(odd.away_team)} className="w-8 h-8 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-white/10 group-hover:scale-110 transition-transform duration-300" alt="" />
                <div className="flex flex-col">
-                 <span className="text-xs font-semibold text-ink">{odd.home_team}</span>
-                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">Moneyline / Spread / Total</span>
+                 <span className="text-xs font-semibold text-zinc-300">{odd.away_team}</span>
+                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest font-mono">Moneyline</span>
                </div>
-               <PriceTag price={homePrice} />
+               <PriceTag price={awayPrice} dark />
              </div>
 
              <div className="grid grid-cols-[auto_1fr_auto] gap-6 items-center">
-               <img src={getLogo(odd.away_team)} className="w-8 h-8 rounded-full shadow-sm ring-1 ring-zinc-200 group-hover:scale-110 transition-transform duration-300" alt="" />
+               <img src={getLogo(odd.home_team)} className="w-8 h-8 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-white/10 group-hover:scale-110 transition-transform duration-300" alt="" />
                <div className="flex flex-col">
-                 <span className="text-xs font-semibold text-ink">{odd.away_team}</span>
-                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">Moneyline / Spread / Total</span>
+                 <span className="text-xs font-semibold text-zinc-300">{odd.home_team}</span>
+                 <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest font-mono">Moneyline</span>
                </div>
-               <PriceTag price={awayPrice} />
+               <PriceTag price={homePrice} dark />
              </div>
            </>
-         ) : (
-           <div className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 px-3 py-4">
-             <span className="text-[10px] uppercase tracking-widest text-zinc-500">
+         ) : odd.status !== 'final' ? (
+           <div className="rounded-xl liquid-glass px-3 py-4">
+             <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono">
                {describeOddsLine(odd) || "ESPN checked. Market line not found yet."}
              </span>
            </div>
-         )}
+         ) : null}
 
          {/* Pitcher Matchup */}
          {(odd.home_pitcher || odd.away_pitcher) && (
-           <div className="w-full mt-6 pt-6 border-t border-zinc-50 transition-opacity">
+           <div className="w-full mt-6 pt-6 border-t border-white/[0.08] transition-opacity">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-1.5 h-1.5 rotate-45 bg-[#2D4A3E] shrink-0 opacity-80" />
-              <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">Pitching Matchup</span>
+              <div className="w-1.5 h-1.5 rotate-45 bg-transparent0 shrink-0 opacity-80" />
+              <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 font-mono">Pitching Matchup</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <PitcherDisplay 
@@ -1898,6 +1955,7 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
                 name={odd.away_pitcher} 
                 headshot={odd.away_pitcher_headshot} 
                 record={odd.away_pitcher_record} 
+                dark
               />
               <PitcherDisplay 
                 teamFull={odd.home_team} 
@@ -1905,27 +1963,28 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
                 headshot={odd.home_pitcher_headshot} 
                 record={odd.home_pitcher_record} 
                 alignRight 
+                dark
               />
             </div>
           </div>
          )}
       </div>
 
-      <div className="pt-6 border-t border-zinc-50">
+      <div className="pt-6 border-t border-white/[0.08] relative z-10">
          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-8">
-            {odd.bookmakers?.length ? (
+            {odd.status !== 'final' && odd.bookmakers?.length ? (
             <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">Total</span>
-               <span className="font-mono text-xs font-bold text-zinc-500">{totalPoint}</span>
+               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest font-mono">Total</span>
+               <span className="font-mono text-xs font-bold text-zinc-400">{totalPoint}</span>
             </div>
             ) : null}
             <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.away_team.split(' ').pop()} Last 10</span>
-               <span className="font-mono text-xs font-bold text-zinc-500">6-4 U</span>
+               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest font-mono">{odd.away_team.split(' ').pop()} Last 10</span>
+               <span className="font-mono text-xs font-bold text-zinc-400">6-4 U</span>
             </div>
             <div className="space-y-1">
-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.home_team.split(' ').pop()} Last 10</span>
-               <span className="font-mono text-xs font-bold text-zinc-500">7-3 U</span>
+               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest font-mono">{odd.home_team.split(' ').pop()} Last 10</span>
+               <span className="font-mono text-xs font-bold text-zinc-400">7-3 U</span>
             </div>
          </div>
       </div>
@@ -1934,12 +1993,17 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
   );
 }
 
-function PriceTag({ price }: { price: number | string }) {
+function PriceTag({ price, dark }: { price: number | string, dark?: boolean }) {
   if (price === 0 || price === "N/A" || !price) return <span className="opacity-0">-</span>;
   const displayPrice = typeof price === 'number' ? (price > 0 ? `+${price}` : price.toString()) : price;
   
   return (
-    <div className="font-mono font-medium text-sm text-ink tracking-tight bg-white shadow-sm border border-zinc-100 rounded-md px-2 py-1 min-w-[50px] text-center">
+    <div className={cn(
+      "font-mono font-medium text-sm tracking-tight rounded-md px-2 py-1 min-w-[50px] text-center",
+      dark 
+        ? "bg-black/[0.04] text-white border border-white/[0.08] shadow-[0_2px_12px_rgba(0,0,0,0.04)]" 
+        : "bg-transparent text-white border border-white/[0.04] shadow-[0_8px_30px_rgb(0,0,0,0.12)]"
+    )}>
        {displayPrice}
     </div>
   );
@@ -1957,100 +2021,100 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
 
   if (!odd) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-500">
+      <div className="h-full w-full flex flex-col items-center justify-center text-zinc-500 bg-transparent">
         <p>Game not found.</p>
-        <button className="mt-4 text-brand hover:underline" onClick={() => navigate('/')}>Back to Board</button>
+        <button className="mt-4 text-white hover:underline" onClick={() => navigate('/')}>Back to Board</button>
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar p-4 sm:p-6 xl:p-10 bg-white">
+    <div className="h-full w-full flex flex-col overflow-y-auto custom-scrollbar p-4 sm:p-6 xl:p-10 bg-transparent">
       <div className="max-w-4xl mx-auto w-full">
-        <button className="text-[10px] items-center flex gap-2 font-bold uppercase tracking-widest text-zinc-500 hover:text-ink mb-8 transition-colors" onClick={() => navigate('/')}>
+        <button className="text-[10px] items-center flex gap-2 font-bold uppercase tracking-widest text-zinc-500 hover:text-white mb-8 transition-colors font-mono" onClick={() => navigate('/')}>
           <ChevronRight size={14} className="rotate-180" /> Back to Daily Board
         </button>
 
-        <h1 className="text-3xl sm:text-5xl font-medium serif-italic text-ink mb-6">{odd.away_team} @ {odd.home_team}</h1>
+        <h1 className="text-3xl sm:text-5xl font-medium serif-italic text-white mb-6">{odd.away_team} @ {odd.home_team}</h1>
         
         <div className="flex items-center gap-4 mb-12">
-           <span className={cn("px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest", odd.status === 'live' ? "bg-brand text-white animate-pulse" : "bg-zinc-100 text-zinc-500")}>
+           <span className={cn("px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest font-mono", odd.status === 'live' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 animate-pulse" : "bg-black/[0.04] text-zinc-400 border border-white/[0.08]")}>
              {odd.status === 'live' ? 'LIVE' : (odd.status === 'final' ? 'FINAL' : 'UPCOMING')}
            </span>
-           <span className="text-sm font-mono text-zinc-500">{new Date(odd.commence_time).toLocaleString()} • {odd.venue || "TBA"}</span>
+           <span className="text-[10px] font-mono text-zinc-500 tracking-widest uppercase">{new Date(odd.commence_time).toLocaleString()} • {odd.venue || "TBA"}</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 border-t border-zinc-100 pt-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 border-t border-white/[0.08] pt-10">
             <div className="flex flex-col gap-6">
-                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Away Side</span>
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest font-mono">Away Side</span>
                 <div className="flex items-center gap-4">
-                  <img src={getEspnLogo(odd.away_team)} className="w-16 h-16 rounded-full border border-zinc-100" alt="" />
+                  <img src={getEspnLogo(odd.away_team)} className="w-16 h-16 rounded-full border border-white/[0.08]" alt="" />
                   <div>
                      <div className="flex items-center gap-3">
-                       <h3 className="text-2xl serif text-ink">{odd.away_team}</h3>
-                       <PriceTag price={awayPrice} />
+                       <h3 className="text-2xl serif text-white">{odd.away_team}</h3>
+                       {odd.status !== 'final' && <PriceTag price={awayPrice} dark />}
                      </div>
-                     <p className="font-mono text-zinc-500 mt-1">{odd.score ? `Score: ${odd.away_score}` : ''}</p>
+                     <p className="font-mono text-zinc-400 mt-1">{odd.score ? `Score: ${odd.away_score}` : ''}</p>
                   </div>
                 </div>
             </div>
             <div className="flex flex-col gap-6 text-right items-end">
-                 <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Home Side</span>
+                 <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest font-mono">Home Side</span>
                  <div className="flex items-center gap-4 flex-row-reverse">
-                   <img src={getEspnLogo(odd.home_team)} className="w-16 h-16 rounded-full border border-zinc-100" alt="" />
+                   <img src={getEspnLogo(odd.home_team)} className="w-16 h-16 rounded-full border border-white/[0.08]" alt="" />
                    <div className="flex flex-col items-end">
                        <div className="flex items-center gap-3 flex-row-reverse">
-                         <h3 className="text-2xl serif text-ink">{odd.home_team}</h3>
-                         <PriceTag price={homePrice} />
+                         <h3 className="text-2xl serif text-white">{odd.home_team}</h3>
+                         {odd.status !== 'final' && <PriceTag price={homePrice} dark />}
                        </div>
-                       <p className="font-mono text-zinc-500 mt-1">{odd.score ? `Score: ${odd.home_score}` : ''}</p>
+                       <p className="font-mono text-zinc-400 mt-1">{odd.score ? `Score: ${odd.home_score}` : ''}</p>
                    </div>
                  </div>
             </div>
         </div>
 
         <div className="flex justify-center mt-8 mb-4">
-          <div className="bg-zinc-50 border border-zinc-100 rounded-lg px-4 sm:px-6 py-4 flex items-center gap-6 sm:gap-12 font-mono text-sm">
+          <div className="bg-transparent border border-white/[0.04] rounded-lg px-4 sm:px-6 py-4 flex items-center gap-6 sm:gap-12 font-mono text-sm">
              <div className="flex flex-col items-center">
-                 <span className="text-[10px] text-zinc-500 font-sans font-bold uppercase mb-1">Total</span>
-                 <span className="text-ink font-bold">{totalPoint !== "-" ? `O/U ${totalPoint}` : "N/A"}</span>
+                 <span className="text-[10px] text-zinc-500 font-bold uppercase mb-1 tracking-widest">Total</span>
+                 <span className="text-white font-bold">{totalPoint !== "-" ? `O/U ${totalPoint}` : "—"}</span>
              </div>
              <div className="flex flex-col items-center">
-                 <span className="text-[10px] text-zinc-500 font-sans font-bold uppercase mb-1">Status</span>
-                 <span className="text-brand font-bold">{odd.status === 'final' ? 'Final' : (odd.situation || 'Pregame')}</span>
+                 <span className="text-[10px] text-zinc-500 font-bold uppercase mb-1 tracking-widest">Status</span>
+                 <span className="text-zinc-300 font-bold">{odd.status === 'final' ? 'Final' : (odd.situation || 'Pregame')}</span>
              </div>
           </div>
         </div>
 
         {(odd.away_pitcher || odd.home_pitcher) && (
-            <div className="mt-10 sm:mt-16 bg-zinc-50 p-6 sm:p-8 rounded-xl border border-zinc-100">
-               <h3 className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500 mb-8 flex items-center gap-3">
-                 <div className="w-2 h-2 rotate-45 bg-[#2D4A3E]" />
+            <div className="mt-10 sm:mt-16 bg-transparent p-6 sm:p-8 rounded-xl border border-white/[0.04]">
+               <h3 className="text-[10px] font-bold uppercase tracking-[0.4em] text-zinc-500 mb-8 flex items-center gap-3 font-mono">
+                 <div className="w-2 h-2 rotate-45 bg-transparent0" />
                  Pitching Matchup
                </h3>
                
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 items-start">
                    <div className="flex flex-col gap-2">
-                       <span className="text-sm font-bold text-zinc-500 uppercase">{odd.away_team.split(' ').pop()} (A)</span>
+                       <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest font-mono">{odd.away_team.split(' ').pop()} (A)</span>
                        <div className="flex items-center gap-3">
-                         <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                         <div className="w-12 h-12 rounded-full overflow-hidden bg-black/20 shrink-0 border border-white/[0.08]">
                            <img src={odd.away_pitcher_headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.away_pitcher || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`} alt={odd.away_pitcher} className="w-full h-full object-cover scale-110" />
                          </div>
                          <div className="flex flex-col">
-                           <span className="text-2xl font-serif text-ink tracking-tight">{odd.away_pitcher || "TBA"}</span>
-                           <span className="font-mono text-sm text-zinc-500">{odd.away_pitcher_record || "No record data"}</span>
+                           <span className="text-2xl font-serif text-white tracking-tight">{odd.away_pitcher || "TBA"}</span>
+                           <span className="font-mono text-sm text-zinc-400">{odd.away_pitcher_record || "No record data"}</span>
                          </div>
                        </div>
                    </div>
                    <div className="flex flex-col gap-2 text-right items-end">
-                       <span className="text-sm font-bold text-zinc-500 uppercase">{odd.home_team.split(' ').pop()} (H)</span>
+                       <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest font-mono">{odd.home_team.split(' ').pop()} (H)</span>
                        <div className="flex items-center gap-3 flex-row-reverse">
-                         <div className="w-12 h-12 rounded-full overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                         <div className="w-12 h-12 rounded-full overflow-hidden bg-black/20 shrink-0 border border-white/[0.08]">
                            <img src={odd.home_pitcher_headshot || `https://api.dicebear.com/7.x/initials/svg?seed=${odd.home_pitcher || 'TBA'}&backgroundColor=e4e4e7&textColor=52525b`} alt={odd.home_pitcher} className="w-full h-full object-cover scale-110" />
                          </div>
                          <div className="flex flex-col text-right">
-                           <span className="text-2xl font-serif text-ink tracking-tight">{odd.home_pitcher || "TBA"}</span>
-                           <span className="font-mono text-sm text-zinc-500">{odd.home_pitcher_record || "No record data"}</span>
+                           <span className="text-2xl font-serif text-white tracking-tight">{odd.home_pitcher || "TBA"}</span>
+                           <span className="font-mono text-sm text-zinc-400">{odd.home_pitcher_record || "No record data"}</span>
                          </div>
                        </div>
                    </div>

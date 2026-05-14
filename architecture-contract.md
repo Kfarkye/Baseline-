@@ -10,6 +10,7 @@
 ## 2. Environment Variables
 | Variable | Description |
 |----------|-------------|
+| `VITE_ODDS_API_KEY` | API Key for "The Odds API" |
 | `GEMINI_API_KEY` | API Key for Google Gemini API |
 | `VITE_FIREBASE_API_KEY` | Firebase Configuration (Auth/Firestore) |
 | `VITE_FIREBASE_AUTH_DOMAIN` | Firebase Configuration |
@@ -70,8 +71,9 @@ When passing data to the Gemini Analysis Engine (`geminiService.ts`), the follow
 ## 4. API Endpoints (Express Server)
 
 ### `GET /api/odds`
-Fetches ESPN-grounded game board and attached market data when available.
-- **Response:** `SportOdds[]` array with ESPN event metadata and `market_data_status` (`grounded` or `partial`).
+Fetches current market data.
+- **Parameters:** `sport` (default: upcoming), `regions` (default: us), `markets` (default: h2h)
+- **Response:** `SportOdds[]` array (includes injected live/mock contexts depending on environment availability of the external API key).
 
 ### `POST /api/chat` (Handled via server-side execution of `@google/genai`)
 - Processes analysis queries, injecting the `SportOdds` board context into the Gemini session history.

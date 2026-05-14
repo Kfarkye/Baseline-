@@ -11,8 +11,16 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -23,33 +31,13 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidPreferences(prefs) {
-      return prefs is map &&
-             prefs.keys().hasOnly(['favoriteLeagues', 'riskLevel']) &&
-             prefs.favoriteLeagues is list &&
-             prefs.riskLevel in ['low', 'medium', 'high'];
-    }
-
     // Entity validations
     function isValidUser(data) {
-      return data.keys().hasOnly([
-               'userId',
-               'email',
-               'displayName',
-               'balance',
-               'planTier',
-               'queryCount',
-               'lastQueryDate',
-               'preferences'
-             ]) &&
+      return data.keys().hasAll(['userId', 'email', 'balance', 'planTier']) &&
+             data.keys().size() >= 4 &&
              data.userId == request.auth.uid &&
              data.email is string && data.email.size() <= 200 &&
-             data.displayName is string && data.displayName.size() <= 120 &&
-             data.balance is number && data.balance == 0 &&
-             data.planTier == 'free' &&
-             data.queryCount is number && data.queryCount == 0 &&
-             data.lastQueryDate is string &&
-             isValidPreferences(data.preferences);
+             data.balance is number && data.balance >= 0;
     }
 
     function isValidChatMessage(data) {
@@ -71,18 +59,16 @@ service cloud.firestore {
     // 1. Users Collection
     match /users/{userId} {
       allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().balance == 0;
       allow update: if isOwner(userId) && (
         // Action: Update Profile/Preferences
-        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'preferences']) &&
-         incoming().displayName is string && incoming().displayName.size() <= 120 &&
-         isValidPreferences(incoming().preferences)) ||
+        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'preferences', 'updatedAt']) && 
+         incoming().updatedAt == request.time) ||
+        // Action: Wallet Deposit
+        (incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'updatedAt']) && 
+         incoming().balance > existing().balance) ||
         // Action: Update Query Tracking
-        (incoming().diff(existing()).affectedKeys().hasOnly(['queryCount', 'lastQueryDate']) &&
-         incoming().queryCount is number &&
-         incoming().queryCount >= 0 &&
-         incoming().queryCount <= 1000000 &&
-         incoming().lastQueryDate is string)
+        incoming().diff(existing()).affectedKeys().hasOnly(['queryCount', 'lastQueryDate', 'updatedAt'])
       );
     }
 
@@ -108,13 +94,12 @@ service cloud.firestore {
              data.fetchedAt is timestamp;
     }
 
-    // 4. Artifacts (Owner-only read/write)
+    // 4. Artifacts (Public read, list for owner, authenticated write)
     match /artifacts/{artifactId} {
-      allow get, list: if isSignedIn() && resource.data.creatorId == request.auth.uid;
-      allow create: if isSignedIn() &&
-                    isValidArtifact(incoming()) &&
-                    incoming().createdAt == request.time &&
-                    incoming().fetchedAt == request.time;
+      allow get: if true;
+      allow list: if isSignedIn() && resource.data.creatorId == request.auth.uid;
+      allow create: if isSignedIn() && isValidArtifact(incoming()) && incoming().createdAt == request.time && incoming().fetchedAt == request.time;
+      allow update: if true && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'fetchedAt']) && incoming().content is string && incoming().content.size() <= 1048576;
     }
   }
 }

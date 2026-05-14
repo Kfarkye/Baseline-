@@ -1,0 +1,22 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index 491e0b9..b59653a 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1915,8 +1914,0 @@ function OddsCard({ odd, onClick }: { odd: SportOdds, onClick?: () => void }) {
+-            <div className="space-y-1">
+-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.away_team.split(' ').pop()} Last 10</span>
+-               <span className="font-mono text-xs font-bold text-zinc-500">6-4 U</span>
+-            </div>
+-            <div className="space-y-1">
+-               <span className="block text-[8px] text-zinc-500 uppercase font-bold tracking-widest">{odd.home_team.split(' ').pop()} Last 10</span>
+-               <span className="font-mono text-xs font-bold text-zinc-500">7-3 U</span>
+-            </div>
+@@ -2009 +2001 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
+-                 <span className="text-ink font-bold">{totalPoint !== "-" ? `O/U ${totalPoint}` : "N/A"}</span>
++                 <span className="text-ink font-bold">{totalPoint !== "-" ? `O/U ${totalPoint}` : <span className="opacity-50">-</span>}</span>
+@@ -2034 +2026 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
+-                           <span className="font-mono text-sm text-zinc-500">{odd.away_pitcher_record || "No record data"}</span>
++                           <span className="font-mono text-sm text-zinc-500">{odd.away_pitcher_record || <span className="opacity-50">-</span>}</span>
+@@ -2046 +2038 @@ function GameDetailView({ odds }: { odds: SportOdds[] }) {
+-                           <span className="font-mono text-sm text-zinc-500">{odd.home_pitcher_record || "No record data"}</span>
++                           <span className="font-mono text-sm text-zinc-500">{odd.home_pitcher_record || <span className="opacity-50">-</span>}</span>
