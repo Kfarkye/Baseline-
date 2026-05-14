@@ -914,6 +914,7 @@ async function startServer() {
   const allowedOrigins = new Set<string>([
     "https://baseline-mlb-xqs7h463qa-uc.a.run.app",
     "https://baseline-mlb-70323048967.us-central1.run.app",
+    "https://baseline-mlb-1049576459547.us-central1.run.app",
     "http://localhost:5000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
