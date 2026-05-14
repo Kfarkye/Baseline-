@@ -1868,6 +1868,8 @@ function ChatMessageItem({ m }: { m: ChatMessage }) {
                 }
                 return <code className="bg-transparent px-1 py-0.5 rounded font-mono text-[10px] text-white border border-white/[0.04]"{...props}>{children}</code>;
               }
+            }}
+          />
           ) : (
             renderText
           )}
